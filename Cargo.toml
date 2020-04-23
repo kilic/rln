@@ -1,0 +1,10 @@
+[package]
+name = "rln"
+version = "0.1.0"
+authors = ["Onur Kılıç <onurkilic@itu.edu.tr>"]
+edition = "2018"
+
+[dependencies]
+rand = "0.4"
+blake2 = "0.8.1"
+sapling-crypto = { package = "sapling-crypto_ce", version = "0.1.2" }
