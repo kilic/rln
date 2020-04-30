@@ -3,6 +3,7 @@ use blake2::{Blake2s, Digest};
 use sapling_crypto::bellman::pairing::ff::{Field, PrimeField, PrimeFieldRepr};
 use sapling_crypto::bellman::pairing::Engine;
 
+#[derive(Clone)]
 pub struct PoseidonParams<E: Engine> {
   rf: usize,
   rp: usize,
@@ -22,8 +23,14 @@ impl<E: Engine> PoseidonParams<E> {
       mds_matrix,
     }
   }
-  pub fn t(&self) -> usize {
-    return self.t;
+
+  pub fn default() -> PoseidonParams<E> {
+    let (t, rf, rp) = (3usize, 8usize, 55usize);
+    let seed = b"".to_vec();
+    let person_mds_matrix = b"drlnhdsm";
+    let round_constants = PoseidonParams::<E>::generate_constants(b"drlnhdsc", seed.clone(), (rf + rp) * t);
+    let mds_matrix = PoseidonParams::<E>::generate_mds_matrix(person_mds_matrix, seed.clone(), t);
+    PoseidonParams::new(rf, rp, t, round_constants, mds_matrix)
   }
 
   pub fn width(&self) -> usize {
@@ -32,10 +39,6 @@ impl<E: Engine> PoseidonParams<E> {
 
   pub fn partial_round_len(&self) -> usize {
     return self.rp;
-  }
-
-  pub fn full_round_len(&self) -> usize {
-    return self.rf + self.rp;
   }
 
   pub fn full_round_half_len(&self) -> usize {
@@ -47,17 +50,22 @@ impl<E: Engine> PoseidonParams<E> {
   }
 
   pub fn round_constant(&self, round: usize, block: usize) -> E::Fr {
-    let w = self.t();
+    let w = self.width();
     return self.round_constants[round * w + block];
   }
 
+  pub fn round_constants(&self, round: usize) -> Vec<E::Fr> {
+    let w = self.width();
+    return self.round_constants[round * w..w * (round + 1)].to_vec();
+  }
+
   pub fn mds_matrix_row(&self, i: usize) -> Vec<E::Fr> {
-    let t = self.t();
-    let mut row: Vec<E::Fr> = Vec::with_capacity(t);
-    for j in i * t..(i + 1) * t {
-      row.push(self.mds_matrix[j]);
-    }
-    row
+    let w = self.width();
+    self.mds_matrix[i * w..(i + 1) * w].to_vec()
+  }
+
+  pub fn mds_matrix(&self) -> Vec<E::Fr> {
+    self.mds_matrix.clone()
   }
 
   pub fn generate_mds_matrix(persona: &[u8; 8], seed: Vec<u8>, t: usize) -> Vec<E::Fr> {
@@ -75,7 +83,6 @@ impl<E: Engine> PoseidonParams<E> {
   }
 
   pub fn generate_constants(persona: &[u8; 8], seed: Vec<u8>, len: usize) -> Vec<E::Fr> {
-    use hex;
     let mut constants: Vec<E::Fr> = Vec::new();
     let mut source = seed.clone();
     loop {
@@ -121,10 +128,9 @@ impl<E: Engine> Poseidon<E> {
     }
   }
 
-  fn new_state(&mut self, inputs: &[E::Fr]) {
+  fn new_state(&mut self, inputs: Vec<E::Fr>) {
     let t = self.t();
-    assert!(inputs.len() < t);
-    self.state = inputs.to_vec();
+    self.state = inputs.clone();
     self.state.resize(t, E::Fr::zero());
   }
 
@@ -140,12 +146,12 @@ impl<E: Engine> Poseidon<E> {
     self.state[0]
   }
 
-  pub fn hash(&mut self, inputs: &[E::Fr]) -> E::Fr {
+  pub fn hash(&mut self, inputs: Vec<E::Fr>) -> E::Fr {
     self.new_state(inputs);
     loop {
       self.round(self.round);
       self.round += 1;
-      if self.round == self.params.full_round_len() {
+      if self.round == self.params.total_rounds() {
         break;
       }
     }
@@ -175,11 +181,6 @@ impl<E: Engine> Poseidon<E> {
     self.mul_mds_matrix();
   }
 
-  fn full_round_no_mds(&mut self, round: usize) {
-    self.add_round_constants(round);
-    self.apply_quintic_sbox(true);
-  }
-
   fn partial_round(&mut self, round: usize) {
     self.add_round_constants(round);
     self.apply_quintic_sbox(false);
@@ -205,6 +206,7 @@ impl<E: Engine> Poseidon<E> {
       }
     }
   }
+
   fn mul_mds_matrix(&mut self) {
     let w = self.params.t;
     let mut new_state = vec![E::Fr::zero(); w];
@@ -220,29 +222,13 @@ impl<E: Engine> Poseidon<E> {
 }
 
 #[test]
-fn test_poseidon() {
+fn test_poseidon_hash() {
   use sapling_crypto::bellman::pairing::bn256;
   use sapling_crypto::bellman::pairing::bn256::{Bn256, Fr};
-
-  let (t, rf, rp) = (3usize, 8usize, 57usize);
-
-  let mut hasher = Blake2s::new();
-  hasher.input(b"rln poseidion t3rf4rp57");
-  let seed = hasher.result().to_vec();
-  let person_full_round_constant = b"rlnhds_c";
-  let person_mds_matrix = b"rlnhds_m";
-
-  let round_constants =
-    PoseidonParams::<Bn256>::generate_constants(person_full_round_constant, seed.clone(), (rf + rp) * t);
-
-  let mds_matrix = PoseidonParams::<Bn256>::generate_mds_matrix(person_mds_matrix, seed.clone(), t);
-
-  let mut hasher = Poseidon::<Bn256>::new_with_params(rf, rp, t, round_constants, mds_matrix);
-
-  // let input1 = [Fr::from_str("1").unwrap(), Fr::from_str("2").unwrap()];
-  let input1 = [Fr::zero()];
-  let r1: Fr = hasher.hash(&input1);
-  let input2 = [Fr::zero(), Fr::zero()];
-  let r2: Fr = hasher.hash(&input2);
+  let mut hasher = Poseidon::<Bn256>::new(PoseidonParams::default());
+  let input1: Vec<Fr> = ["0"].iter().map(|e| Fr::from_str(e).unwrap()).collect();
+  let r1: Fr = hasher.hash(input1.to_vec());
+  let input2: Vec<Fr> = ["0", "0"].iter().map(|e| Fr::from_str(e).unwrap()).collect();
+  let r2: Fr = hasher.hash(input2.to_vec());
   assert_eq!(r1, r2, "just to see if internal state resets");
 }
