@@ -240,6 +240,5 @@ fn test_poseidon_hash() {
   let r1: Fr = hasher.hash(input1.to_vec());
   let input2: Vec<Fr> = ["0", "0"].iter().map(|e| Fr::from_str(e).unwrap()).collect();
   let r2: Fr = hasher.hash(input2.to_vec());
-  println!("{}", r2);
   assert_eq!(r1, r2, "just to see if internal state resets");
 }

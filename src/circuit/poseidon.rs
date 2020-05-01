@@ -242,11 +242,7 @@ where
     Ok(())
   }
 
-  fn mul_mds_matrix<CS: ConstraintSystem<E>>(
-    &mut self,
-    mut cs: CS,
-    ctx: &mut RoundCtx<E>,
-  ) -> Result<(), SynthesisError> {
+  fn mul_mds_matrix<CS: ConstraintSystem<E>>(&mut self, ctx: &mut RoundCtx<E>) -> Result<(), SynthesisError> {
     assert_eq!(ctx.width(), self.elements.len());
 
     if !ctx.is_last_round() {
@@ -328,7 +324,7 @@ where
         _ => {
           let round_number = ctx.round_number();
           state.sbox(cs.namespace(|| format!("sbox {}", round_number)), &mut ctx)?;
-          state.mul_mds_matrix(cs.namespace(|| format!("mds {}", round_number)), &mut ctx)?;
+          state.mul_mds_matrix::<CS>(&mut ctx)?;
         }
       }
     }
@@ -356,7 +352,7 @@ fn test_poseidon_circuit() {
     })
     .collect();
 
-  let mut circuit = PoseidonCircuit::<Bn256>::new(params.clone());
+  let circuit = PoseidonCircuit::<Bn256>::new(params.clone());
   let res_allocated = circuit.alloc(cs.namespace(|| "hash alloc"), allocated_inputs).unwrap();
   let result = res_allocated.get_value().unwrap();
   let mut poseidon = PoseidonHasher::new(params.clone());

@@ -320,17 +320,14 @@ mod test {
         circuit.synthesize(&mut cs).unwrap();
         let unsatisfied = cs.which_is_unsatisfied();
         if unsatisfied.is_some() {
-          println!("unsatisfied\n{}", unsatisfied.unwrap());
-          // panic!("unsatisfied\n{}", unsatisfied.unwrap());
+          panic!("unsatisfied\n{}", unsatisfied.unwrap());
         }
         let unconstrained = cs.find_unconstrained();
         if !unconstrained.is_empty() {
-          // panic!("unconstrained\n{}", unconstrained);
-          println!("unconstrained\n{}", unconstrained);
+          panic!("unconstrained\n{}", unconstrained);
         }
-        // assert!(cs.is_satisfied());
-        println!("{}", cs.is_satisfied());
-        println!("number of constaints {}", cs.num_constraints());
+        assert!(cs.is_satisfied());
+        println!("number of constaints: {}", cs.num_constraints());
       }
 
       {
@@ -352,9 +349,11 @@ mod test {
         key_size += parameters.b_g1.len() * point_size;
         key_size += parameters.b_g2.len() * point_size * 2;
 
+        println!("prover key size in bytes: {}", key_size);
+
         let now = Instant::now();
         let proof = create_random_proof(circuit, &parameters, &mut rng).unwrap();
-        println!("prover time {}", now.elapsed().as_millis() as f64 / 1000.0);
+        println!("prover time: {}", now.elapsed().as_millis() as f64 / 1000.0);
 
         let verifing_key = prepare_verifying_key(&parameters.vk);
         assert!(verify_proof(&verifing_key, &proof, &inputs.public_inputs()).unwrap());
