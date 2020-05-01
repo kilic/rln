@@ -12,6 +12,13 @@ pub struct PoseidonParams<E: Engine> {
   mds_matrix: Vec<E::Fr>,
 }
 
+#[derive(Clone)]
+pub struct Poseidon<E: Engine> {
+  state: Vec<E::Fr>,
+  round: usize,
+  params: PoseidonParams<E>,
+}
+
 impl<E: Engine> PoseidonParams<E> {
   pub fn new(rf: usize, rp: usize, t: usize, round_constants: Vec<E::Fr>, mds_matrix: Vec<E::Fr>) -> PoseidonParams<E> {
     assert_eq!((rf + rp) * t, round_constants.len());
@@ -27,9 +34,8 @@ impl<E: Engine> PoseidonParams<E> {
   pub fn default() -> PoseidonParams<E> {
     let (t, rf, rp) = (3usize, 8usize, 55usize);
     let seed = b"".to_vec();
-    let person_mds_matrix = b"drlnhdsm";
     let round_constants = PoseidonParams::<E>::generate_constants(b"drlnhdsc", seed.clone(), (rf + rp) * t);
-    let mds_matrix = PoseidonParams::<E>::generate_mds_matrix(person_mds_matrix, seed.clone(), t);
+    let mds_matrix = PoseidonParams::<E>::generate_mds_matrix(b"drlnhdsm", seed.clone(), t);
     PoseidonParams::new(rf, rp, t, round_constants, mds_matrix)
   }
 
@@ -103,12 +109,6 @@ impl<E: Engine> PoseidonParams<E> {
   }
 }
 
-pub struct Poseidon<E: Engine> {
-  state: Vec<E::Fr>,
-  round: usize,
-  params: PoseidonParams<E>,
-}
-
 impl<E: Engine> Poseidon<E> {
   pub fn new_with_params(
     rf: usize,
@@ -169,7 +169,11 @@ impl<E: Engine> Poseidon<E> {
     } else if round >= a1 && round < a2 {
       self.partial_round(round);
     } else if round >= a2 && round < a3 {
-      self.full_round(round);
+      if round == a3 - 1 {
+        self.full_round_last();
+      } else {
+        self.full_round(round);
+      }
     } else {
       panic!("should not be here")
     }
@@ -179,6 +183,12 @@ impl<E: Engine> Poseidon<E> {
     self.add_round_constants(round);
     self.apply_quintic_sbox(true);
     self.mul_mds_matrix();
+  }
+
+  fn full_round_last(&mut self) {
+    let last_round = self.params.total_rounds() - 1;
+    self.add_round_constants(last_round);
+    self.apply_quintic_sbox(true);
   }
 
   fn partial_round(&mut self, round: usize) {
@@ -230,5 +240,6 @@ fn test_poseidon_hash() {
   let r1: Fr = hasher.hash(input1.to_vec());
   let input2: Vec<Fr> = ["0", "0"].iter().map(|e| Fr::from_str(e).unwrap()).collect();
   let r2: Fr = hasher.hash(input2.to_vec());
+  println!("{}", r2);
   assert_eq!(r1, r2, "just to see if internal state resets");
 }
