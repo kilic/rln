@@ -4,4 +4,3 @@
 mod circuit;
 mod merkle;
 mod poseidon;
-
