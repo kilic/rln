@@ -21,7 +21,7 @@ pub struct Poseidon<E: Engine> {
 
 impl<E: Engine> PoseidonParams<E> {
   pub fn new(rf: usize, rp: usize, t: usize, round_constants: Vec<E::Fr>, mds_matrix: Vec<E::Fr>) -> PoseidonParams<E> {
-    assert_eq!((rf + rp) * t, round_constants.len());
+    assert_eq!(rf + rp, round_constants.len());
     PoseidonParams {
       rf,
       rp,
@@ -34,7 +34,7 @@ impl<E: Engine> PoseidonParams<E> {
   pub fn default() -> PoseidonParams<E> {
     let (t, rf, rp) = (3usize, 8usize, 55usize);
     let seed = b"".to_vec();
-    let round_constants = PoseidonParams::<E>::generate_constants(b"drlnhdsc", seed.clone(), (rf + rp) * t);
+    let round_constants = PoseidonParams::<E>::generate_constants(b"drlnhdsc", seed.clone(), rf + rp);
     let mds_matrix = PoseidonParams::<E>::generate_mds_matrix(b"drlnhdsm", seed.clone(), t);
     PoseidonParams::new(rf, rp, t, round_constants, mds_matrix)
   }
@@ -55,14 +55,9 @@ impl<E: Engine> PoseidonParams<E> {
     return self.rf + self.rp;
   }
 
-  pub fn round_constant(&self, round: usize, block: usize) -> E::Fr {
+  pub fn round_constant(&self, round: usize) -> E::Fr {
     let w = self.width();
-    return self.round_constants[round * w + block];
-  }
-
-  pub fn round_constants(&self, round: usize) -> Vec<E::Fr> {
-    let w = self.width();
-    return self.round_constants[round * w..w * (round + 1)].to_vec();
+    return self.round_constants[round];
   }
 
   pub fn mds_matrix_row(&self, i: usize) -> Vec<E::Fr> {
@@ -200,7 +195,7 @@ impl<E: Engine> Poseidon<E> {
   fn add_round_constants(&mut self, round: usize) {
     let w = self.params.t;
     for (j, b) in self.state.iter_mut().enumerate() {
-      let c = self.params.round_constants[round * w + j];
+      let c = self.params.round_constants[round];
       b.add_assign(&c);
     }
   }
@@ -240,5 +235,6 @@ fn test_poseidon_hash() {
   let r1: Fr = hasher.hash(input1.to_vec());
   let input2: Vec<Fr> = ["0", "0"].iter().map(|e| Fr::from_str(e).unwrap()).collect();
   let r2: Fr = hasher.hash(input2.to_vec());
+  // println!("{:?}", r1);
   assert_eq!(r1, r2, "just to see if internal state resets");
 }

@@ -362,7 +362,15 @@ mod test {
   }
 
   #[test]
-  fn test_rln() {
+  fn test_rln_24() {
+    use sapling_crypto::bellman::pairing::bn256::Bn256;
+    let poseidon_params = PoseidonParams::<Bn256>::default();
+    let rln_test = RLNTest::new(poseidon_params, 24);
+    rln_test.run();
+  }
+
+  #[test]
+  fn test_rln_32() {
     use sapling_crypto::bellman::pairing::bn256::Bn256;
     let poseidon_params = PoseidonParams::<Bn256>::default();
     let rln_test = RLNTest::new(poseidon_params, 32);

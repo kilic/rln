@@ -146,13 +146,8 @@ where
     self.number == a1 - 1 || self.number == a2 - 1
   }
 
-  pub fn round_constants(&self) -> Vec<E::Fr> {
-    self.params.round_constants(self.number)
-  }
-
-  pub fn round_constant(&self, j: usize) -> E::Fr {
-    let round_constants = self.params.round_constants(self.number);
-    round_constants[j]
+  pub fn round_constant(&self) -> E::Fr {
+    self.params.round_constant(self.number)
   }
 
   pub fn mds_matrix_row(&self, i: usize) -> Vec<E::Fr> {
@@ -203,7 +198,7 @@ where
     assert_eq!(ctx.width(), self.elements.len());
 
     for i in 0..if ctx.is_full_round() { ctx.width() } else { 1 } {
-      let round_constant = ctx.round_constant(i);
+      let round_constant = ctx.round_constant();
       let si = {
         match self.elements[i].allocated() {
           Some(an) => an,
@@ -272,11 +267,11 @@ where
       // or in partial rounds expect the last one.
       if in_transition == is_full_round {
         // add round constants for elements in {1, t}
-        let round_constants = ctx.round_constants();
+        let round_constant = ctx.round_constant();
         for i in 1..w {
           let mut constant_as_num = num::Num::<E>::zero();
           constant_as_num =
-            constant_as_num.add_bool_with_coeff(CS::one(), &boolean::Boolean::Constant(true), round_constants[i]);
+            constant_as_num.add_bool_with_coeff(CS::one(), &boolean::Boolean::Constant(true), round_constant);
           new_state[i].add_assign(&constant_as_num);
         }
       }
