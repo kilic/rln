@@ -72,8 +72,7 @@ where
         }
       }
     };
-    let x = self.hasher.hash(vec![new]);
-    self.nodes.insert((d, leaf_index), x);
+    
     self.recalculate_from(leaf_index);
   }
 

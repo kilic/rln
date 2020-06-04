@@ -1,6 +1,9 @@
 #![allow(dead_code)]
 #![allow(unused_imports)]
 
-mod circuit;
-mod merkle;
-mod poseidon;
+pub mod circuit;
+pub mod merkle;
+pub mod poseidon;
+
+#[cfg(target_arch = "wasm32")]
+mod wasm;

@@ -1,2 +1,5 @@
 /target
+/pkg
+node_modules
+*.key
 Cargo.lock

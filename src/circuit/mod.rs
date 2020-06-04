@@ -1,3 +1,3 @@
 mod polynomial;
-mod poseidon;
-mod rln;
+pub mod poseidon;
+pub mod rln;

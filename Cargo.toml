@@ -1,10 +1,22 @@
 [package]
 name = "rln"
 version = "0.1.0"
-authors = ["Onur Kılıç <onurkilic@itu.edu.tr>"]
+authors = ["Onur Kılıç <kiliconu@itu.edu.tr>"]
 edition = "2018"
+
+[lib]
+crate-type = ["cdylib", "rlib"]
 
 [dependencies]
 rand = "0.4"
 blake2 = "0.8.1"
 sapling-crypto = { package = "sapling-crypto_ce", version = "0.1.2" }
+hex = "0.4.2"
+
+[target.'cfg(target_arch = "wasm32")'.dependencies]
+console_error_panic_hook = { version = "0.1.1" }
+wasm-bindgen = "0.2"
+wee_alloc = "0.4.5"
+
+[target.'cfg(target_arch = "wasm32")'.dev-dependencies]
+wasm-bindgen-test = "0.2"
