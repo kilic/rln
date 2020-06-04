@@ -72,7 +72,8 @@ where
         }
       }
     };
-    self.nodes.insert((d, leaf_index), self.hasher.hash(vec![new]));
+    let x = self.hasher.hash(vec![new]);
+    self.nodes.insert((d, leaf_index), x);
     self.recalculate_from(leaf_index);
   }
 
@@ -130,4 +131,16 @@ fn test_merkle_set() {
   set.insert(leaf_index, data[0], zero);
   let witness = set.witness(leaf_index);
   assert!(set.check_inclusion(witness, leaf_index, data[0]));
+}
+
+#[test]
+fn test_merkle_zeros() {
+  use sapling_crypto::bellman::pairing::bn256::{Bn256, Fr, FrRepr};
+  let params = PoseidonParams::<Bn256>::default();
+  let hasher = Hasher::new(params);
+  let mut set = MerkleTree::empty(hasher, 32);
+  set.insert(5, Fr::from_str("1").unwrap(), Some(Fr::zero()));
+  println!("{}", set.root());
+  set.insert(6, Fr::from_str("2").unwrap(), Some(Fr::zero()));
+  println!("{}", set.root());
 }

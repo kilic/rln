@@ -1,10 +1,13 @@
 use crate::circuit::polynomial::allocate_add_with_coeff;
 use crate::circuit::poseidon::PoseidonCircuit;
 use crate::poseidon::{Poseidon as PoseidonHasher, PoseidonParams};
+use sapling_crypto::bellman::pairing::ff::{Field, PrimeField, PrimeFieldRepr};
 use sapling_crypto::bellman::pairing::Engine;
 use sapling_crypto::bellman::{Circuit, ConstraintSystem, SynthesisError, Variable};
 use sapling_crypto::circuit::{boolean, ecc, num, Assignment};
 use sapling_crypto::jubjub::{JubjubEngine, JubjubParams, PrimeOrder};
+
+use std::io::{self, Read, Write};
 
 // Rate Limit Nullifier
 
@@ -46,7 +49,7 @@ impl<E> RLNInputs<E>
 where
   E: Engine,
 {
-  fn public_inputs(self) -> Vec<E::Fr> {
+  fn public_inputs(&self) -> Vec<E::Fr> {
     vec![
       self.root.unwrap(),
       self.epoch.unwrap(),
@@ -54,6 +57,82 @@ where
       self.share_y.unwrap(),
       self.nullifier.unwrap(),
     ]
+  }
+
+  pub fn merkle_depth(&self) -> usize {
+    self.auth_path.len()
+  }
+
+  pub fn empty(merkle_depth: usize) -> RLNInputs<E> {
+    RLNInputs::<E> {
+      share_x: None,
+      share_y: None,
+      epoch: None,
+      nullifier: None,
+      root: None,
+      id_key: None,
+      auth_path: vec![None; merkle_depth],
+    }
+  }
+
+  pub fn read<R: Read>(mut reader: R) -> io::Result<RLNInputs<E>> {
+    let mut buf = <E::Fr as PrimeField>::Repr::default();
+    buf.read_le(&mut reader)?;
+    let share_x = E::Fr::from_repr(buf).map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))?;
+    buf.read_le(&mut reader)?;
+    let share_y = E::Fr::from_repr(buf).map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))?;
+    buf.read_le(&mut reader)?;
+    let epoch = E::Fr::from_repr(buf).map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))?;
+    buf.read_le(&mut reader)?;
+    let nullifier = E::Fr::from_repr(buf).map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))?;
+    buf.read_le(&mut reader)?;
+    let root = E::Fr::from_repr(buf).map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))?;
+    buf.read_le(&mut reader)?;
+    let id_key = E::Fr::from_repr(buf).map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))?;
+    let mut byte_buf = vec![0u8; 1];
+    let mut auth_path: Vec<Option<(E::Fr, bool)>> = vec![];
+    loop {
+      match reader.read_exact(&mut byte_buf) {
+        Ok(_) => match byte_buf[0] {
+          0u8 => auth_path.push(Some((E::Fr::zero(), false))),
+          1u8 => auth_path.push(Some((E::Fr::one(), true))),
+          _ => {
+            return Err(io::Error::new(
+              io::ErrorKind::InvalidInput,
+              "auth path element should be 1 or 0",
+            ))
+          }
+        },
+        Err(ref err) if err.kind() == io::ErrorKind::UnexpectedEof => {
+          break;
+        }
+        Err(err) => return Err(err),
+      };
+    }
+    Ok(RLNInputs {
+      share_x: Some(share_x),
+      share_y: Some(share_y),
+      epoch: Some(epoch),
+      nullifier: Some(nullifier),
+      root: Some(root),
+      id_key: Some(id_key),
+      auth_path,
+    })
+  }
+
+  pub fn read_public_inputs<R: Read>(mut reader: R) -> io::Result<Vec<E::Fr>> {
+    let mut buf = <E::Fr as PrimeField>::Repr::default();
+    buf.read_le(&mut reader)?;
+    let root = E::Fr::from_repr(buf).map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))?;
+    buf.read_le(&mut reader)?;
+    let epoch = E::Fr::from_repr(buf).map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))?;
+    buf.read_le(&mut reader)?;
+    let share_x = E::Fr::from_repr(buf).map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))?;
+    buf.read_le(&mut reader)?;
+    let share_y = E::Fr::from_repr(buf).map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))?;
+    buf.read_le(&mut reader)?;
+    let nullifier = E::Fr::from_repr(buf).map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))?;
+    Ok(vec![root, epoch, share_x, share_y, nullifier])
   }
 }
 
@@ -204,9 +283,10 @@ mod test {
   use crate::merkle::MerkleTree;
   use crate::poseidon::{Poseidon as PoseidonHasher, PoseidonParams};
   use rand::{Rand, SeedableRng, XorShiftRng};
-  use sapling_crypto::bellman::groth16::{
-    create_random_proof, generate_random_parameters, prepare_verifying_key, verify_proof,
-  };
+  // use sapling_crypto::bellman::groth16::{
+  //   create_random_proof, generate_random_parameters, prepare_verifying_key, verify_proof, Parameters,
+  // };
+  use sapling_crypto::bellman::groth16::*;
   use sapling_crypto::bellman::pairing::ff::{Field, PrimeField, PrimeFieldRepr};
   use sapling_crypto::bellman::pairing::Engine;
   use sapling_crypto::bellman::Circuit;
@@ -349,7 +429,11 @@ mod test {
         key_size += parameters.b_g1.len() * point_size;
         key_size += parameters.b_g2.len() * point_size * 2;
 
+        let mut v = vec![];
+        parameters.write(&mut v).unwrap();
+
         println!("prover key size in bytes: {}", key_size);
+        println!("prover key size in bytes2: {}", v.len());
 
         let now = Instant::now();
         let proof = create_random_proof(circuit, &parameters, &mut rng).unwrap();
@@ -375,5 +459,36 @@ mod test {
     let poseidon_params = PoseidonParams::<Bn256>::default();
     let rln_test = RLNTest::new(poseidon_params, 32);
     rln_test.run();
+  }
+
+  #[test]
+  fn test_input_serialization() {
+    use sapling_crypto::bellman::pairing::bn256::{Bn256, Fr};
+    use sapling_crypto::bellman::pairing::ff::{Field, PrimeField, PrimeFieldRepr};
+    let share_x = Fr::from_str("1").unwrap();
+    let share_y = Fr::from_str("2").unwrap();
+    let epoch = Fr::from_str("3").unwrap();
+    let nullifier = Fr::from_str("4").unwrap();
+    let root = Fr::from_str("5").unwrap();
+    let id_key = Fr::from_str("6").unwrap();
+    let mut writer: Vec<u8> = Vec::new();
+    share_x.into_repr().write_le(&mut writer).unwrap();
+    share_y.into_repr().write_le(&mut writer).unwrap();
+    epoch.into_repr().write_le(&mut writer).unwrap();
+    nullifier.into_repr().write_le(&mut writer).unwrap();
+    root.into_repr().write_le(&mut writer).unwrap();
+    id_key.into_repr().write_le(&mut writer).unwrap();
+    writer.push(1u8);
+    writer.push(1u8);
+    writer.push(1u8);
+    writer.push(1u8);
+    let inputs = RLNInputs::<Bn256>::read(writer.as_slice()).unwrap();
+    assert_eq!(inputs.share_x.unwrap().eq(&share_x), true);
+    assert_eq!(inputs.share_y.unwrap().eq(&share_y), true);
+    assert_eq!(inputs.epoch.unwrap().eq(&epoch), true);
+    assert_eq!(inputs.nullifier.unwrap().eq(&nullifier), true);
+    assert_eq!(inputs.root.unwrap().eq(&root), true);
+    assert_eq!(inputs.id_key.unwrap().eq(&id_key), true);
+    assert_eq!(4, inputs.merkle_depth());
   }
 }
