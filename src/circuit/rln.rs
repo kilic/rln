@@ -89,26 +89,7 @@ where
     let root = E::Fr::from_repr(buf).map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))?;
     buf.read_le(&mut reader)?;
     let id_key = E::Fr::from_repr(buf).map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))?;
-    let mut byte_buf = vec![0u8; 1];
-    let mut auth_path: Vec<Option<(E::Fr, bool)>> = vec![];
-    loop {
-      match reader.read_exact(&mut byte_buf) {
-        Ok(_) => match byte_buf[0] {
-          0u8 => auth_path.push(Some((E::Fr::zero(), false))),
-          1u8 => auth_path.push(Some((E::Fr::one(), true))),
-          _ => {
-            return Err(io::Error::new(
-              io::ErrorKind::InvalidInput,
-              "auth path element should be 1 or 0",
-            ))
-          }
-        },
-        Err(ref err) if err.kind() == io::ErrorKind::UnexpectedEof => {
-          break;
-        }
-        Err(err) => return Err(err),
-      };
-    }
+    let auth_path = Self::decode_auth_path(&mut reader)?;
     Ok(RLNInputs {
       share_x: Some(share_x),
       share_y: Some(share_y),
@@ -118,6 +99,17 @@ where
       id_key: Some(id_key),
       auth_path,
     })
+  }
+
+  pub fn write<W: Write>(&self, mut writer: W) -> io::Result<()> {
+    self.share_x.unwrap().into_repr().write_le(&mut writer).unwrap();
+    self.share_y.unwrap().into_repr().write_le(&mut writer).unwrap();
+    self.epoch.unwrap().into_repr().write_le(&mut writer).unwrap();
+    self.nullifier.unwrap().into_repr().write_le(&mut writer).unwrap();
+    self.root.unwrap().into_repr().write_le(&mut writer).unwrap();
+    self.id_key.unwrap().into_repr().write_le(&mut writer).unwrap();
+    Self::encode_auth_path(&mut writer, self.auth_path.clone()).unwrap();
+    Ok(())
   }
 
   pub fn read_public_inputs<R: Read>(mut reader: R) -> io::Result<Vec<E::Fr>> {
@@ -133,6 +125,53 @@ where
     buf.read_le(&mut reader)?;
     let nullifier = E::Fr::from_repr(buf).map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))?;
     Ok(vec![root, epoch, share_x, share_y, nullifier])
+  }
+
+  pub fn write_public_inputs<W: Write>(&self, mut writer: W) -> io::Result<()> {
+    self.root.unwrap().into_repr().write_le(&mut writer)?;
+    self.epoch.unwrap().into_repr().write_le(&mut writer)?;
+    self.share_x.unwrap().into_repr().write_le(&mut writer)?;
+    self.share_y.unwrap().into_repr().write_le(&mut writer)?;
+    self.nullifier.unwrap().into_repr().write_le(&mut writer)?;
+    Ok(())
+  }
+
+  pub fn encode_auth_path<W: Write>(mut writer: W, auth_path: Vec<Option<(E::Fr, bool)>>) -> io::Result<()> {
+    let path_len = auth_path.len() as u8;
+    writer.write(&[path_len])?;
+    for el in auth_path.iter() {
+      let c = el.unwrap();
+      if c.1 {
+        writer.write(&[1])?;
+      } else {
+        writer.write(&[0])?;
+      }
+      c.0.into_repr().write_le(&mut writer).unwrap();
+    }
+    Ok(())
+  }
+
+  pub fn decode_auth_path<R: Read>(mut reader: R) -> io::Result<Vec<Option<(E::Fr, bool)>>> {
+    let mut byte_buf = vec![0u8; 1];
+    let mut el_buf = <E::Fr as PrimeField>::Repr::default();
+    let mut auth_path: Vec<Option<(E::Fr, bool)>> = vec![];
+    reader.read_exact(&mut byte_buf)?;
+    let path_len = byte_buf[0];
+    if path_len < 2 {
+      return Err(io::Error::new(io::ErrorKind::InvalidInput, "invalid path length"));
+    }
+    for _ in 0..path_len {
+      reader.read_exact(&mut byte_buf)?;
+      let path_dir = match byte_buf[0] {
+        0u8 => false,
+        1u8 => true,
+        _ => return Err(io::Error::new(io::ErrorKind::InvalidInput, "invalid path direction")),
+      };
+      el_buf.read_le(&mut reader)?;
+      let node = E::Fr::from_repr(el_buf).map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))?;
+      auth_path.push(Some((node, path_dir)));
+    }
+    Ok(auth_path)
   }
 }
 
@@ -471,24 +510,31 @@ mod test {
     let nullifier = Fr::from_str("4").unwrap();
     let root = Fr::from_str("5").unwrap();
     let id_key = Fr::from_str("6").unwrap();
-    let mut writer: Vec<u8> = Vec::new();
-    share_x.into_repr().write_le(&mut writer).unwrap();
-    share_y.into_repr().write_le(&mut writer).unwrap();
-    epoch.into_repr().write_le(&mut writer).unwrap();
-    nullifier.into_repr().write_le(&mut writer).unwrap();
-    root.into_repr().write_le(&mut writer).unwrap();
-    id_key.into_repr().write_le(&mut writer).unwrap();
-    writer.push(1u8);
-    writer.push(1u8);
-    writer.push(1u8);
-    writer.push(1u8);
-    let inputs = RLNInputs::<Bn256>::read(writer.as_slice()).unwrap();
-    assert_eq!(inputs.share_x.unwrap().eq(&share_x), true);
-    assert_eq!(inputs.share_y.unwrap().eq(&share_y), true);
-    assert_eq!(inputs.epoch.unwrap().eq(&epoch), true);
-    assert_eq!(inputs.nullifier.unwrap().eq(&nullifier), true);
-    assert_eq!(inputs.root.unwrap().eq(&root), true);
-    assert_eq!(inputs.id_key.unwrap().eq(&id_key), true);
-    assert_eq!(4, inputs.merkle_depth());
+    let auth_path = vec![
+      Some((Fr::from_str("20").unwrap(), false)),
+      Some((Fr::from_str("21").unwrap(), true)),
+      Some((Fr::from_str("22").unwrap(), true)),
+      Some((Fr::from_str("23").unwrap(), false)),
+    ];
+    let input0 = RLNInputs::<Bn256> {
+      share_x: Some(share_x),
+      share_y: Some(share_y),
+      epoch: Some(epoch),
+      nullifier: Some(nullifier),
+      root: Some(root),
+      id_key: Some(id_key),
+      auth_path,
+    };
+    let mut raw_inputs: Vec<u8> = Vec::new();
+    input0.write(&mut raw_inputs).unwrap();
+    let mut reader = raw_inputs.as_slice();
+    let input1 = RLNInputs::<Bn256>::read(&mut reader).unwrap();
+    assert_eq!(input0.share_x, input1.share_x);
+    assert_eq!(input0.share_y, input1.share_y);
+    assert_eq!(input0.epoch, input1.epoch);
+    assert_eq!(input0.nullifier, input1.nullifier);
+    assert_eq!(input0.root, input1.root);
+    assert_eq!(input0.id_key, input1.id_key);
+    assert_eq!(input0.auth_path, input1.auth_path);
   }
 }

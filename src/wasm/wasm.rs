@@ -91,75 +91,63 @@ mod test {
     writer
   }
 
-  #[wasm_bindgen_test]
-  fn test_rln_wasm() {
-    let merkle_depth = 32usize;
-    let circuit_parameters = gen_circuit_parameters(merkle_depth);
-    //
-    // prepare inputs
-
+  fn gen_valid_inputs(merkle_depth: usize) -> RLNInputs<Bn256> {
     let mut rng = XorShiftRng::from_seed([0x3dbe6258, 0x8d313d76, 0x3237db17, 0xe5bc0654]);
     let poseidon_params = PoseidonParams::<Bn256>::default();
     let mut hasher = PoseidonHasher::new(poseidon_params.clone());
     let mut membership_tree = MerkleTree::empty(hasher.clone(), merkle_depth);
 
-    // A. setup an identity
-
     let id_key = Fr::rand(&mut rng);
     let id_comm = hasher.hash(vec![id_key.clone()]);
 
-    // B. insert to the membership tree
-
-    let id_index = 6; // any number below 2^depth will work
+    let id_index = 6;
     membership_tree.update(id_index, id_comm);
-
-    // C.1 get membership witness
 
     let auth_path = membership_tree.witness(id_index);
     assert!(membership_tree.check_inclusion(auth_path.clone(), id_index, id_key.clone()));
 
-    // C.2 prepare sss
-
-    // get current epoch
     let epoch = Fr::rand(&mut rng);
 
     let signal_hash = Fr::rand(&mut rng);
-    // evaluation point is the signal_hash
     let share_x = signal_hash.clone();
 
-    // calculate current line equation
     let a_0 = id_key.clone();
     let a_1 = hasher.hash(vec![a_0, epoch]);
 
-    // evaluate line equation
     let mut share_y = a_1.clone();
     share_y.mul_assign(&share_x);
     share_y.add_assign(&a_0);
 
-    // calculate nullfier
     let nullifier = hasher.hash(vec![a_1]);
 
     let root = membership_tree.root();
 
-    //
-    // serialize input
+    let inputs = RLNInputs::<Bn256> {
+      share_x: Some(share_x),
+      share_y: Some(share_y),
+      epoch: Some(epoch),
+      nullifier: Some(nullifier),
+      root: Some(membership_tree.root()),
+      id_key: Some(id_key),
+      auth_path: auth_path.into_iter().map(|w| Some(w)).collect(),
+    };
 
-    let mut writer: Vec<u8> = Vec::new();
-    share_x.into_repr().write_le(&mut writer).unwrap();
-    share_y.into_repr().write_le(&mut writer).unwrap();
-    epoch.into_repr().write_le(&mut writer).unwrap();
-    nullifier.into_repr().write_le(&mut writer).unwrap();
-    root.into_repr().write_le(&mut writer).unwrap();
-    id_key.into_repr().write_le(&mut writer).unwrap();
-    for (e, _) in auth_path.iter() {
-      e.into_repr().write_le(&mut writer).unwrap();
-    }
-    let raw_circuit_parameters = writer.as_slice();
+    inputs
+  }
 
-    //
-    // call wasm
-
+  #[wasm_bindgen_test]
+  fn test_rln_wasm() {
+    let merkle_depth = 32usize;
+    let raw_circuit_parameters = gen_circuit_parameters(merkle_depth);
+    let inputs = gen_valid_inputs(merkle_depth);
+    let mut raw_inputs: Vec<u8> = Vec::new();
+    inputs.write(&mut raw_inputs);
     use super::RLNWasm;
-    // let rlnWasm = RLNWasm::new(merkle_depth, raw_circuit_parameters);
+    let rln_wasm = RLNWasm::new(merkle_depth, raw_circuit_parameters.as_slice());
+    let proof = rln_wasm.generate_proof(raw_inputs.as_slice());
+    let mut public_inputs: Vec<u8> = Vec::new();
+    inputs.write_public_inputs(&mut public_inputs);
+    let proof = proof.unwrap();
+    assert_eq!(rln_wasm.verify(proof.as_slice(), public_inputs.as_slice()), true);
   }
 }
