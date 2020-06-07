@@ -56,7 +56,6 @@ impl<E: Engine> PoseidonParams<E> {
   }
 
   pub fn round_constant(&self, round: usize) -> E::Fr {
-    let w = self.width();
     return self.round_constants[round];
   }
 
@@ -193,8 +192,7 @@ impl<E: Engine> Poseidon<E> {
   }
 
   fn add_round_constants(&mut self, round: usize) {
-    let w = self.params.t;
-    for (j, b) in self.state.iter_mut().enumerate() {
+    for (_, b) in self.state.iter_mut().enumerate() {
       let c = self.params.round_constants[round];
       b.add_assign(&c);
     }

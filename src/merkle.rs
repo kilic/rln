@@ -7,7 +7,7 @@ pub struct MerkleTree<E>
 where
   E: Engine,
 {
-  hasher: Hasher<E>,
+  pub hasher: Hasher<E>,
   zero: Vec<E::Fr>,
   depth: usize,
   nodes: HashMap<(usize, usize), E::Fr>,
@@ -72,8 +72,8 @@ where
         }
       }
     };
-    
-    self.recalculate_from(leaf_index);
+    let leaf = self.hasher.hash(vec![new]);
+    self.update(leaf_index, leaf);
   }
 
   pub fn update(&mut self, leaf_index: usize, leaf: E::Fr) {
