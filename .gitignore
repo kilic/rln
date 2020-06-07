@@ -1,5 +1,6 @@
 /target
 /pkg
+/examples/www
 node_modules
 *.key
 Cargo.lock
