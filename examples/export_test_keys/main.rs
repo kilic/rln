@@ -5,6 +5,11 @@ fn main() {
     test_keys::export::<Bn256>(merkle_depth);
 }
 
+#[cfg(target_arch = "wasm32")]
+fn main() {
+    panic!("should not be run in wasm");
+}
+
 #[cfg(not(target_arch = "wasm32"))]
 mod test_keys {
     use sapling_crypto::bellman::pairing::Engine;
