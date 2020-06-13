@@ -8,11 +8,8 @@ edition = "2018"
 crate-type = ["cdylib", "rlib"]
 
 [features]
-default = ["sapling_multicore"]
-wasm = ["sapling_wasm"]
-bellman_wasm = ["bellman/wasm", "bellman/nolog"]
-sapling_wasm = ["sapling-crypto/wasm"]
-sapling_multicore = ["sapling-crypto/multicore"]
+multicore = ["sapling-crypto/multicore", "bellman/multicore"]
+wasm = ["sapling-crypto/wasm", "bellman/wasm", "bellman/nolog"]
 
 [dependencies]
 rand = "0.4"
@@ -22,8 +19,9 @@ bellman = { package = "bellman_ce", version = "0.3.4", default-features = false 
 
 [target.'cfg(target_arch = "wasm32")'.dependencies]
 console_error_panic_hook = { version = "0.1.1" }
-wasm-bindgen = "0.2"
+wasm-bindgen = "0.2.63"
 wee_alloc = "0.4.5"
+web-sys = {version = "0.3", features = ["console", "Performance", "Window"]}
 
 [target.'cfg(target_arch = "wasm32")'.dev-dependencies]
-wasm-bindgen-test = "0.2"
+wasm-bindgen-test = "0.3"
