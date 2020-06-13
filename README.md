@@ -33,5 +33,5 @@ Follow the steps [here](https://rustwasm.github.io/docs/wasm-bindgen/wasm-bindge
 Then run:
 
 ```
-cargo build --tests --release --target wasm32-unknown-unknown --features wasm
+cargo test --release --target wasm32-unknown-unknown --features wasm
 ```
