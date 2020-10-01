@@ -10,12 +10,15 @@ crate-type = ["cdylib", "rlib"]
 [features]
 multicore = ["sapling-crypto/multicore", "bellman/multicore"]
 wasm = ["sapling-crypto/wasm", "bellman/wasm", "bellman/nolog"]
+bench = []
 
 [dependencies]
 rand = "0.4"
 blake2 = "0.8.1"
-sapling-crypto = { package = "sapling-crypto_ce", version = "0.1.3", default-features = false }
-bellman = { package = "bellman_ce", version = "0.3.4", default-features = false }
+# sapling-crypto = { package = "sapling-crypto_ce", version = "0.1.3", default-features = false }
+sapling-crypto = {package = "sapling-crypto_ce", path = "../sapling-crypto" }
+# bellman = { package = "bellman_ce", version = "0.3.4", default-features = false }
+bellman = {package = "bellman_ce", path = "../bellman" }
 
 [target.'cfg(target_arch = "wasm32")'.dependencies]
 console_error_panic_hook = { version = "0.1.1" }
