@@ -377,13 +377,13 @@ mod test {
 
     #[test]
     fn test_rln_bn_24() {
-        let result = bench::run_rln_bn_24();
+        let result = bench::run_rln_bn(24);
         result.print();
     }
 
     #[test]
     fn test_rln_bn_32() {
-        let result = bench::run_rln_bn_32();
+        let result = bench::run_rln_bn(32);
         result.print();
     }
 
