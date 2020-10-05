@@ -20,7 +20,8 @@ mod test_keys {
         use rln::poseidon::PoseidonParams;
         use sapling_crypto::bellman::groth16::generate_random_parameters;
         use std::fs::File;
-        let poseidon_params = PoseidonParams::<E>::default();
+
+        let poseidon_params = PoseidonParams::<E>::new(8, 55, 3, None, None, None);
         let mut rng = XorShiftRng::from_seed([0x3dbe6258, 0x8d313d76, 0x3237db17, 0xe5bc0654]);
         let hasher = PoseidonCircuit::new(poseidon_params.clone());
         let circuit = RLNCircuit::<E> {

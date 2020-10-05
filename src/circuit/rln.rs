@@ -374,17 +374,62 @@ mod test {
 
     use super::RLNInputs;
     use crate::circuit::bench;
+    use crate::poseidon::PoseidonParams;
+    use sapling_crypto::bellman::pairing::bls12_381::Bls12;
+    use sapling_crypto::bellman::pairing::bn256::Bn256;
+    use sapling_crypto::bellman::pairing::Engine;
 
-    #[test]
-    fn test_rln_bn_24() {
-        let result = bench::run_rln_bn(24);
-        result.print();
+    struct TestSuite<E: Engine> {
+        merkle_depth: usize,
+        poseidon_parameters: PoseidonParams<E>,
+    }
+
+    fn cases<E: Engine>() -> Vec<TestSuite<E>> {
+        vec![
+            TestSuite {
+                merkle_depth: 16,
+                poseidon_parameters: PoseidonParams::new(8, 55, 3, None, None, None),
+            },
+            TestSuite {
+                merkle_depth: 24,
+                poseidon_parameters: PoseidonParams::new(8, 55, 3, None, None, None),
+            },
+            TestSuite {
+                merkle_depth: 32,
+                poseidon_parameters: PoseidonParams::new(8, 55, 3, None, None, None),
+            },
+            TestSuite {
+                merkle_depth: 16,
+                poseidon_parameters: PoseidonParams::new(8, 33, 3, None, None, None),
+            },
+            TestSuite {
+                merkle_depth: 24,
+                poseidon_parameters: PoseidonParams::new(8, 33, 3, None, None, None),
+            },
+            TestSuite {
+                merkle_depth: 32,
+                poseidon_parameters: PoseidonParams::new(8, 33, 3, None, None, None),
+            },
+        ]
     }
 
     #[test]
-    fn test_rln_bn_32() {
-        let result = bench::run_rln_bn(32);
-        result.print();
+    fn test_rln_bn() {
+        use sapling_crypto::bellman::pairing::bn256::Bn256;
+        let cases = cases::<Bn256>();
+        for case in cases.iter() {
+            let rln_test =
+                bench::RLNTest::<Bn256>::new(case.merkle_depth, case.poseidon_parameters.clone());
+            let result = rln_test.run();
+            println!(
+                "bn256, t: {}, rf: {}, rp: {}, merkle depth: {}",
+                case.poseidon_parameters.width(),
+                case.poseidon_parameters.full_round_half_len() * 2,
+                case.poseidon_parameters.partial_round_len(),
+                case.merkle_depth,
+            );
+            result.print();
+        }
     }
 
     #[test]

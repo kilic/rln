@@ -367,7 +367,7 @@ fn test_poseidon_circuit() {
     use sapling_crypto::circuit::test::TestConstraintSystem;
 
     let mut cs = TestConstraintSystem::<Bn256>::new();
-    let params = PoseidonParams::default();
+    let params = PoseidonParams::new(8, 55, 3, None, None, None);
 
     let inputs: Vec<Fr> = ["0", "0"]
         .iter()

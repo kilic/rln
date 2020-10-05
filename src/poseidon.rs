@@ -24,26 +24,32 @@ impl<E: Engine> PoseidonParams<E> {
         rf: usize,
         rp: usize,
         t: usize,
-        round_constants: Vec<E::Fr>,
-        mds_matrix: Vec<E::Fr>,
+        round_constants: Option<Vec<E::Fr>>,
+        mds_matrix: Option<Vec<E::Fr>>,
+        seed: Option<Vec<u8>>,
     ) -> PoseidonParams<E> {
-        assert_eq!(rf + rp, round_constants.len());
+        let seed = match seed {
+            Some(seed) => seed,
+            None => b"".to_vec(),
+        };
+
+        let _round_constants = match round_constants {
+            Some(round_constants) => round_constants,
+            None => PoseidonParams::<E>::generate_constants(b"drlnhdsc", seed.clone(), rf + rp),
+        };
+        assert_eq!(rf + rp, _round_constants.len());
+
+        let _mds_matrix = match mds_matrix {
+            Some(mds_matrix) => mds_matrix,
+            None => PoseidonParams::<E>::generate_mds_matrix(b"drlnhdsm", seed.clone(), t),
+        };
         PoseidonParams {
             rf,
             rp,
             t,
-            round_constants,
-            mds_matrix,
+            round_constants: _round_constants,
+            mds_matrix: _mds_matrix,
         }
-    }
-
-    pub fn default() -> PoseidonParams<E> {
-        let (t, rf, rp) = (3usize, 8usize, 55usize);
-        let seed = b"".to_vec();
-        let round_constants =
-            PoseidonParams::<E>::generate_constants(b"drlnhdsc", seed.clone(), rf + rp);
-        let mds_matrix = PoseidonParams::<E>::generate_mds_matrix(b"drlnhdsm", seed.clone(), t);
-        PoseidonParams::new(rf, rp, t, round_constants, mds_matrix)
     }
 
     pub fn width(&self) -> usize {
@@ -111,16 +117,6 @@ impl<E: Engine> PoseidonParams<E> {
 }
 
 impl<E: Engine> Poseidon<E> {
-    pub fn new_with_params(
-        rf: usize,
-        rp: usize,
-        t: usize,
-        round_constants: Vec<E::Fr>,
-        mds_matrix: Vec<E::Fr>,
-    ) -> Poseidon<E> {
-        let params = PoseidonParams::new(rf, rp, t, round_constants, mds_matrix);
-        Poseidon::new(params)
-    }
     pub fn new(params: PoseidonParams<E>) -> Poseidon<E> {
         Poseidon {
             round: 0,
@@ -235,7 +231,8 @@ impl<E: Engine> Poseidon<E> {
 fn test_poseidon_hash() {
     use sapling_crypto::bellman::pairing::bn256;
     use sapling_crypto::bellman::pairing::bn256::{Bn256, Fr};
-    let mut hasher = Poseidon::<Bn256>::new(PoseidonParams::default());
+    let params = PoseidonParams::<Bn256>::new(8, 55, 3, None, None, None);
+    let mut hasher = Poseidon::<Bn256>::new(params);
     let input1: Vec<Fr> = ["0"].iter().map(|e| Fr::from_str(e).unwrap()).collect();
     let r1: Fr = hasher.hash(input1.to_vec());
     let input2: Vec<Fr> = ["0", "0"]

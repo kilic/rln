@@ -34,12 +34,11 @@ impl BenchResult {
     }
 }
 
-// TODO make it composable: curve, poseidon, merkle
-pub fn run_rln_bn(merkle_depth: usize) -> BenchResult {
-    use sapling_crypto::bellman::pairing::bn256::Bn256;
-    let poseidon_params = PoseidonParams::<Bn256>::default();
-    let rln_test = RLNTest::new(poseidon_params, merkle_depth);
-    rln_test.run()
+pub fn run_rln_bench<E: Engine>(
+    merkle_depth: usize,
+    poseidon_params: PoseidonParams<E>,
+) -> BenchResult {
+    RLNTest::new(merkle_depth, poseidon_params).run()
 }
 
 pub struct RLNTest<E>
@@ -54,8 +53,7 @@ impl<E> RLNTest<E>
 where
     E: Engine,
 {
-    pub fn new(poseidon_params: PoseidonParams<E>, merkle_depth: usize) -> RLNTest<E> {
-        // let cs = TestConstraintSystem::<E>::new();
+    pub fn new(merkle_depth: usize, poseidon_params: PoseidonParams<E>) -> RLNTest<E> {
         RLNTest::<E> {
             poseidon_params,
             merkle_depth,

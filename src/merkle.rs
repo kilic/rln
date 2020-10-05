@@ -132,7 +132,7 @@ fn test_merkle_set() {
         .map(|s| Fr::from_str(&format!("{}", s)).unwrap())
         .collect();
     use sapling_crypto::bellman::pairing::bn256::{Bn256, Fr, FrRepr};
-    let params = PoseidonParams::<Bn256>::default();
+    let params = PoseidonParams::<Bn256>::new(8, 55, 3, None, None, None);
     let hasher = Hasher::new(params);
     let mut set = MerkleTree::empty(hasher, 3);
     let leaf_index = 6;
@@ -144,7 +144,7 @@ fn test_merkle_set() {
 #[test]
 fn test_merkle_zeros() {
     use sapling_crypto::bellman::pairing::bn256::{Bn256, Fr, FrRepr};
-    let params = PoseidonParams::<Bn256>::default();
+    let params = PoseidonParams::<Bn256>::new(8, 55, 3, None, None, None);
     let hasher = Hasher::new(params);
     let mut set = MerkleTree::empty(hasher, 32);
     set.insert(5, Fr::from_str("1").unwrap(), Some(Fr::zero()));
