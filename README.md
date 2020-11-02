@@ -18,7 +18,13 @@ cargo run --release --example export_test_keys
 
 ## Wasm Support
 
-## Test
+### Build
+
+```
+wasm-pack build --release --target=nodejs --out-name=$PACKAGE --out-dir=$PACKAGE_DIR -- --features wasm
+```
+
+### Test
 
 With wasm-pack:
 
