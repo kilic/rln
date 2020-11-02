@@ -1,4 +1,7 @@
-use super::utils::set_panic_hook;
+use super::utils::{
+    g1_to_hex, g2_to_hex, read_uncompressed_proof, set_panic_hook, write_uncompressed_proof, G1Hex,
+    G2Hex,
+};
 use crate::circuit::poseidon::PoseidonCircuit;
 use crate::circuit::rln::{RLNCircuit, RLNInputs};
 use crate::merkle::MerkleTree;
@@ -6,56 +9,15 @@ use crate::poseidon::{Poseidon as PoseidonHasher, PoseidonParams};
 use bellman::groth16::generate_random_parameters;
 use bellman::groth16::{create_proof, prepare_verifying_key, verify_proof};
 use bellman::groth16::{create_random_proof, Parameters, Proof};
-use bellman::pairing::bn256::{Bn256, Fr};
+use bellman::pairing::bn256::{Bn256, Fr, G1Affine, G2Affine};
 use bellman::pairing::ff::{Field, PrimeField, PrimeFieldRepr};
-use bellman::pairing::CurveAffine;
-use bellman::pairing::Engine;
+use bellman::pairing::{CurveAffine, EncodedPoint, Engine};
 use bellman::{Circuit, ConstraintSystem, SynthesisError};
 use rand::{Rand, SeedableRng, XorShiftRng};
 use std::io::{self, Error, ErrorKind, Read, Write};
 use wasm_bindgen::prelude::*;
 
 use js_sys::Array;
-use sapling_crypto::bellman::pairing::bn256::{G1Affine, G2Affine};
-
-pub fn g1_to_hex(point: G1Affine) -> G1Hex {
-    let mut buf_x: Vec<u8> = vec![];
-    let mut buf_y: Vec<u8> = vec![];
-    let point_xy = point.into_xy_unchecked();
-    point_xy.0.into_repr().write_be(&mut buf_x).unwrap();
-    let x = hex::encode(buf_x);
-    point_xy.1.into_repr().write_be(&mut buf_y).unwrap();
-    let y = hex::encode(buf_y);
-    G1Hex { x, y }
-}
-
-pub fn g2_to_hex(point: G2Affine) -> G2Hex {
-    let mut buf_x_c0: Vec<u8> = vec![];
-    let mut buf_x_c1: Vec<u8> = vec![];
-    let mut buf_y_c0: Vec<u8> = vec![];
-    let mut buf_y_c1: Vec<u8> = vec![];
-
-    let point_xy = point.into_xy_unchecked();
-
-    point_xy.0.c0.into_repr().write_be(&mut buf_x_c0).unwrap();
-    let x_c0 = hex::encode(buf_x_c0);
-
-    point_xy.0.c1.into_repr().write_be(&mut buf_x_c1).unwrap();
-    let x_c1 = hex::encode(buf_x_c1);
-
-    point_xy.1.c0.into_repr().write_be(&mut buf_y_c0).unwrap();
-    let y_c0 = hex::encode(buf_y_c0);
-
-    point_xy.1.c1.into_repr().write_be(&mut buf_y_c1).unwrap();
-    let y_c1 = hex::encode(buf_y_c1);
-
-    G2Hex {
-        x_c0,
-        x_c1,
-        y_c0,
-        y_c1,
-    }
-}
 
 #[wasm_bindgen]
 pub struct RLNWasm {
@@ -73,20 +35,6 @@ pub struct VerifierKey {
     ic_array: Array,
 }
 
-#[wasm_bindgen]
-pub struct G1Hex {
-    x: String,
-    y: String,
-}
-
-#[wasm_bindgen]
-pub struct G2Hex {
-    x_c0: String,
-    x_c1: String,
-    y_c0: String,
-    y_c1: String,
-}
-
 impl VerifierKey {
     pub fn new(circuit_parameters: Parameters<Bn256>) -> VerifierKey {
         let vk = circuit_parameters.vk;
@@ -101,34 +49,6 @@ impl VerifierKey {
             delta_2: g2_to_hex(vk.delta_g2),
             ic_array,
         }
-    }
-}
-
-impl G1Hex {
-    pub fn x(&self) -> String {
-        self.x.clone()
-    }
-
-    pub fn y(&self) -> String {
-        self.y.clone()
-    }
-}
-
-impl G2Hex {
-    pub fn x_c0(&self) -> String {
-        self.x_c0.clone()
-    }
-
-    pub fn x_c1(&self) -> String {
-        self.x_c1.clone()
-    }
-
-    pub fn y_c0(&self) -> String {
-        self.y_c0.clone()
-    }
-
-    pub fn y_c1(&self) -> String {
-        self.y_c1.clone()
     }
 }
 
@@ -187,13 +107,13 @@ impl RLNWasm {
         let proof = create_random_proof(circuit, &self.circuit_parameters, &mut rng)
             .expect("failed to create proof");
         let mut output: Vec<u8> = Vec::new();
-        proof.write(&mut output).expect("failed to write proof");
+        write_uncompressed_proof(proof, &mut output);
         Ok(output)
     }
 
     #[wasm_bindgen]
-    pub fn verify(&self, raw_proof: &[u8], raw_public_inputs: &[u8]) -> bool {
-        let proof = Proof::read(raw_proof).unwrap();
+    pub fn verify(&self, uncompresed_proof: &[u8], raw_public_inputs: &[u8]) -> bool {
+        let proof = read_uncompressed_proof(uncompresed_proof).unwrap();
         let public_inputs = RLNInputs::<Bn256>::read_public_inputs(raw_public_inputs)
             .expect("failed to read public inputs");
         let verifing_key = prepare_verifying_key(&self.circuit_parameters.vk);
@@ -231,7 +151,7 @@ mod test {
         let id_key = Fr::rand(&mut rng);
         let id_comm = hasher.hash(vec![id_key.clone()]);
 
-        let id_index = 6;
+        let id_index = 0;
         membership_tree.update(id_index, id_comm);
 
         let auth_path = membership_tree.witness(id_index);
@@ -268,7 +188,7 @@ mod test {
 
     #[wasm_bindgen_test]
     fn test_rln_wasm() {
-        let merkle_depth = 32usize;
+        let merkle_depth = 3usize;
 
         let rln_wasm = super::RLNWasm::new(merkle_depth);
 
