@@ -180,6 +180,7 @@ where
             result.prover_time = now.elapsed().as_millis() as f64 / 1000.0;
 
             let verifing_key = prepare_verifying_key(&parameters.vk);
+
             assert!(verify_proof(&verifing_key, &proof, &inputs.public_inputs()).unwrap());
         }
 

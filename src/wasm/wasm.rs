@@ -1,7 +1,4 @@
-use super::utils::{
-    g1_to_hex, g2_to_hex, read_uncompressed_proof, set_panic_hook, write_uncompressed_proof, G1Hex,
-    G2Hex,
-};
+use super::utils::{read_uncompressed_proof, set_panic_hook, write_uncompressed_proof};
 use crate::circuit::poseidon::PoseidonCircuit;
 use crate::circuit::rln::{RLNCircuit, RLNInputs};
 use crate::merkle::MerkleTree;
@@ -24,32 +21,6 @@ pub struct RLNWasm {
     circuit_parameters: Parameters<Bn256>,
     circuit_hasher: PoseidonCircuit<Bn256>,
     merkle_depth: usize,
-}
-
-#[wasm_bindgen]
-pub struct VerifierKey {
-    alpha_1: G1Hex,
-    beta_2: G2Hex,
-    gamma_2: G2Hex,
-    delta_2: G2Hex,
-    ic_array: Array,
-}
-
-impl VerifierKey {
-    pub fn new(circuit_parameters: Parameters<Bn256>) -> VerifierKey {
-        let vk = circuit_parameters.vk;
-        let ic_array: Array = Array::new();
-        for e_ic in vk.ic.iter() {
-            ic_array.push(&wasm_bindgen::JsValue::from(g1_to_hex(e_ic.clone())));
-        }
-        VerifierKey {
-            alpha_1: g1_to_hex(vk.alpha_g1),
-            beta_2: g2_to_hex(vk.beta_g2),
-            gamma_2: g2_to_hex(vk.gamma_g2),
-            delta_2: g2_to_hex(vk.delta_g2),
-            ic_array,
-        }
-    }
 }
 
 #[wasm_bindgen]
@@ -107,7 +78,7 @@ impl RLNWasm {
         let proof = create_random_proof(circuit, &self.circuit_parameters, &mut rng)
             .expect("failed to create proof");
         let mut output: Vec<u8> = Vec::new();
-        write_uncompressed_proof(proof, &mut output);
+        write_uncompressed_proof(proof, &mut output).expect("failed to write proof");
         Ok(output)
     }
 
@@ -123,8 +94,13 @@ impl RLNWasm {
     }
 
     #[wasm_bindgen]
-    pub fn verifier_key(&self) -> VerifierKey {
-        VerifierKey::new(self.circuit_parameters.clone())
+    pub fn verifier_key(&self) -> Result<Vec<u8>, JsValue> {
+        let mut output: Vec<u8> = Vec::new();
+        self.circuit_parameters
+            .vk
+            .write(&mut output)
+            .expect("failed to write verifier key");
+        Ok(output)
     }
 }
 
