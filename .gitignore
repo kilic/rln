@@ -5,3 +5,4 @@ node_modules
 *.key
 Cargo.lock
 .cargo
+tmp_wasm

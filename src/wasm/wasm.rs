@@ -102,6 +102,15 @@ impl RLNWasm {
             .expect("failed to write verifier key");
         Ok(output)
     }
+
+    #[wasm_bindgen]
+    pub fn export_circuit_parameters(&self) -> Result<Vec<u8>, JsValue> {
+        let mut output: Vec<u8> = Vec::new();
+        self.circuit_parameters
+            .write(&mut output)
+            .expect("failed to write verifier key");
+        Ok(output)
+    }
 }
 
 #[cfg(test)]
