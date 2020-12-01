@@ -387,7 +387,7 @@ mod test {
     fn cases<E: Engine>() -> Vec<TestSuite<E>> {
         vec![
             TestSuite {
-                merkle_depth: 16,
+                merkle_depth: 3,
                 poseidon_parameters: PoseidonParams::new(8, 55, 3, None, None, None),
             },
             TestSuite {
@@ -418,9 +418,12 @@ mod test {
         use sapling_crypto::bellman::pairing::bn256::Bn256;
         let cases = cases::<Bn256>();
         for case in cases.iter() {
-            let rln_test =
-                bench::RLNTest::<Bn256>::new(case.merkle_depth, case.poseidon_parameters.clone());
-            let result = rln_test.run();
+            let rln_test = bench::RLNTest::<Bn256>::new(
+                case.merkle_depth,
+                Some(case.poseidon_parameters.clone()),
+            );
+            let num_constraints = rln_test.synthesize();
+            let result = rln_test.run_prover_bench();
             println!(
                 "bn256, t: {}, rf: {}, rp: {}, merkle depth: {}",
                 case.poseidon_parameters.width(),
@@ -428,7 +431,9 @@ mod test {
                 case.poseidon_parameters.partial_round_len(),
                 case.merkle_depth,
             );
-            result.print();
+            println!("number of constatins:\t{}", num_constraints);
+            println!("prover key size:\t{}", result.prover_key_size);
+            println!("prover time:\t{}", result.prover_time);
         }
     }
 
