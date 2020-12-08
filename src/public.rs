@@ -2,11 +2,10 @@ use crate::circuit::poseidon::PoseidonCircuit;
 use crate::circuit::rln::{RLNCircuit, RLNInputs};
 use crate::merkle::MerkleTree;
 use crate::poseidon::{Poseidon as PoseidonHasher, PoseidonParams};
-use crate::utils::{read_uncompressed_proof, write_uncompressed_proof};
+use crate::utils::{read_inputs, read_uncompressed_proof, write_uncompressed_proof};
 use bellman::groth16::generate_random_parameters;
 use bellman::groth16::{create_proof, prepare_verifying_key, verify_proof};
 use bellman::groth16::{create_random_proof, Parameters, Proof};
-// use bellman::pairing::bn256::{E, Fr, G1Affine, G2Affine};
 use bellman::pairing::ff::{Field, PrimeField, PrimeFieldRepr};
 use bellman::pairing::{CurveAffine, EncodedPoint, Engine};
 use bellman::{Circuit, ConstraintSystem, SynthesisError};
@@ -87,6 +86,15 @@ where
 
     pub fn hasher(&self) -> PoseidonHasher<E> {
         PoseidonHasher::new(self.poseidon_params.clone())
+    }
+
+    pub fn hash<R: Read>(&self, inputs: R, n: usize) -> io::Result<Vec<u8>> {
+        let mut hasher = self.hasher();
+        let inputs: Vec<E::Fr> = read_inputs::<R, E>(inputs, n)?;
+        let output = hasher.hash(inputs);
+        let mut output_data: Vec<u8> = Vec::new();
+        output.into_repr().write_le(&mut output_data)?;
+        Ok(output_data)
     }
 
     pub fn generate_proof<R: Read>(&self, input: R) -> io::Result<Vec<u8>> {

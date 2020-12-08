@@ -1,10 +1,21 @@
 use bellman::groth16::Proof;
-// use bellman::pairing::bn256::{Bn256, G1Affine, G2Affine};
 use bellman::pairing::ff::{Field, PrimeField, PrimeFieldRepr};
 use bellman::pairing::{CurveAffine, EncodedPoint, Engine};
 
 use rand::{Rand, SeedableRng, XorShiftRng};
 use std::io::{self, Error, ErrorKind, Read, Write};
+
+pub fn read_inputs<R: Read, E: Engine>(mut reader: R, n: usize) -> io::Result<Vec<E::Fr>> {
+    let mut out: Vec<E::Fr> = Vec::new();
+    let mut buf = <E::Fr as PrimeField>::Repr::default();
+    for _ in 0..n {
+        buf.read_le(&mut reader)?;
+        let input =
+            E::Fr::from_repr(buf).map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))?;
+        out.push(input);
+    }
+    Ok(out)
+}
 
 pub fn write_uncompressed_proof<W: Write, E: Engine>(
     proof: Proof<E>,

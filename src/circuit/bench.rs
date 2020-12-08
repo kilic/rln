@@ -71,6 +71,10 @@ where
         }
     }
 
+    pub fn hasher(&self) -> PoseidonHasher<E> {
+        self.rln.hasher()
+    }
+
     pub fn valid_inputs(&self) -> RLNInputs<E> {
         let mut rng = Self::rng();
         let mut hasher = self.rln.hasher();

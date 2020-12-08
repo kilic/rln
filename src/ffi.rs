@@ -72,7 +72,6 @@ pub unsafe fn verify(
     let proof_data = <&[u8]>::from(unsafe { &*proof_buffer });
     let public_inputs_data = <&[u8]>::from(unsafe { &*public_inputs_buffer });
     let rln = unsafe { &*ctx };
-    rln.verify(proof_data, public_inputs_data).unwrap();
     if match rln.verify(proof_data, public_inputs_data) {
         Ok(verified) => verified,
         Err(_) => return false,
@@ -84,6 +83,28 @@ pub unsafe fn verify(
     true
 }
 
+pub unsafe fn hash(
+    ctx: *const RLN<Bn256>,
+    inputs_buffer: *const Buffer,
+    input_len: *const usize,
+    output_buffer: *mut Buffer,
+) -> bool {
+    let input_data = <&[u8]>::from(unsafe { &*inputs_buffer });
+    let rln = unsafe { &*ctx };
+    let n: usize = *input_len;
+    let output_data = match rln.hash(input_data, n) {
+        Ok(output_data) => output_data,
+        Err(_) => return false,
+    };
+    unsafe { *output_buffer = Buffer::from(&output_data[..]) };
+    std::mem::forget(output_data);
+    true
+}
+
+use sapling_crypto::bellman::pairing::ff::{Field, PrimeField, PrimeFieldRepr};
+use sapling_crypto::bellman::pairing::Engine;
+use std::io::{self, Read, Write};
+
 #[cfg(test)]
 mod tests {
     use crate::circuit::bench;
@@ -91,21 +112,22 @@ mod tests {
     use bellman::pairing::bn256::{Bn256, Fr};
 
     use super::*;
-    use hex;
     use std::mem::MaybeUninit;
 
-    #[test]
-    fn test_ffi() {
-        let merkle_depth = 3usize;
+    fn merkle_depth() -> usize {
+        3usize
+    }
+
+    fn rln_test() -> bench::RLNTest<Bn256> {
+        let merkle_depth = merkle_depth();
         let poseidon_params = PoseidonParams::<Bn256>::new(8, 55, 3, None, None, None);
         let rln_test = bench::RLNTest::<Bn256>::new(merkle_depth, Some(poseidon_params));
-
-        let mut circuit_parameters: Vec<u8> = Vec::new();
         rln_test
-            .export_circuit_parameters(&mut circuit_parameters)
-            .unwrap();
+    }
 
+    fn rln_pointer(circuit_parameters: Vec<u8>) -> MaybeUninit<*mut RLN<Bn256>> {
         // restore this new curcuit with bindings
+        let merkle_depth = merkle_depth();
         let circuit_parameters_buffer = &Buffer::from(circuit_parameters.as_ref());
         let mut rln_pointer = MaybeUninit::<*mut RLN<Bn256>>::uninit();
         unsafe {
@@ -116,6 +138,19 @@ mod tests {
             )
         };
 
+        rln_pointer
+    }
+
+    #[test]
+    fn test_proof_ffi() {
+        let rln_test = rln_test();
+
+        let mut circuit_parameters: Vec<u8> = Vec::new();
+        rln_test
+            .export_circuit_parameters(&mut circuit_parameters)
+            .unwrap();
+
+        let rln_pointer = rln_pointer(circuit_parameters);
         let rln_pointer = unsafe { &*rln_pointer.assume_init() };
 
         let mut inputs_data: Vec<u8> = Vec::new();
@@ -142,5 +177,53 @@ mod tests {
             unsafe { verify(rln_pointer, &proof_buffer, public_inputs_buffer, result_ptr) };
         assert!(success, "verification operation failed");
         assert_eq!(0, result);
+    }
+
+    #[test]
+    fn test_hash_ffi() {
+        let rln_test = rln_test();
+
+        let mut circuit_parameters: Vec<u8> = Vec::new();
+        rln_test
+            .export_circuit_parameters(&mut circuit_parameters)
+            .unwrap();
+        let mut hasher = rln_test.hasher();
+
+        let rln_pointer = rln_pointer(circuit_parameters);
+        let rln_pointer = unsafe { &*rln_pointer.assume_init() };
+
+        let mut input_data: Vec<u8> = Vec::new();
+
+        let inputs: Vec<Fr> = ["1", "2"]
+            .iter()
+            .map(|e| Fr::from_str(e).unwrap())
+            .collect();
+        inputs.iter().for_each(|e| {
+            e.into_repr().write_le(&mut input_data).unwrap();
+        });
+        let input_buffer = &Buffer::from(input_data.as_ref());
+
+        let input_len: usize = 2;
+        let input_len_pointer = &input_len as *const usize;
+
+        let expected = hasher.hash(inputs);
+        let mut expected_data: Vec<u8> = Vec::new();
+        expected.into_repr().write_le(&mut expected_data).unwrap();
+
+        let mut result_buffer = MaybeUninit::<Buffer>::uninit();
+
+        let success = unsafe {
+            hash(
+                rln_pointer,
+                input_buffer,
+                input_len_pointer,
+                result_buffer.as_mut_ptr(),
+            )
+        };
+        assert!(success, "hash ffi call failed");
+
+        let result_buffer = unsafe { result_buffer.assume_init() };
+        let result_data = <&[u8]>::from(&result_buffer);
+        assert_eq!(expected_data.as_slice(), result_data);
     }
 }

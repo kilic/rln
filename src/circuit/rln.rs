@@ -77,9 +77,12 @@ where
 
     pub fn read<R: Read>(mut reader: R) -> io::Result<RLNInputs<E>> {
         let mut buf = <E::Fr as PrimeField>::Repr::default();
+
         buf.read_le(&mut reader)?;
         let share_x =
             E::Fr::from_repr(buf).map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))?;
+
+            
         buf.read_le(&mut reader)?;
         let share_y =
             E::Fr::from_repr(buf).map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))?;
