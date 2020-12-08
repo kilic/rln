@@ -32,6 +32,27 @@ js-sys = "0.3.37"
 wasm-bindgen-test = "0.3"
 
 [profile.release]
-# Tell `rustc` to optimize for small code size.
 opt-level = 3
+lto = "thin"
+incremental = true
+
+# build all our deps in release mode 
+[profile.dev.package."*"]
+opt-level = 3
+
+[profile.bench]
+opt-level = 3
+debug = false
+rpath = false
+lto = "thin"
+incremental = true
+debug-assertions = false
+
+
+[profile.test]
+opt-level = 3
+incremental = true
+debug-assertions = true
+debug = true
+
 
