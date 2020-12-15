@@ -63,7 +63,7 @@ pub unsafe extern "C" fn generate_proof(
 }
 
 #[no_mangle]
-pub unsafe fn verify(
+pub unsafe extern "C" fn verify(
     ctx: *const RLN<Bn256>,
     proof_buffer: *const Buffer,
     public_inputs_buffer: *const Buffer,
@@ -83,7 +83,8 @@ pub unsafe fn verify(
     true
 }
 
-pub unsafe fn hash(
+#[no_mangle]
+pub unsafe extern "C" fn hash(
     ctx: *const RLN<Bn256>,
     inputs_buffer: *const Buffer,
     input_len: *const usize,
