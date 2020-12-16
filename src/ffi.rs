@@ -46,16 +46,17 @@ pub extern "C" fn new_circuit_from_params(
 pub extern "C" fn generate_proof(
     ctx: *const RLN<Bn256>,
     input_buffer: *const Buffer,
-    proof_buffer: *mut Buffer,
+    output_buffer: *mut Buffer,
 ) -> bool {
-    let input_data = <&[u8]>::from(unsafe { &*input_buffer });
     let rln = unsafe { &*ctx };
-    let proof_data = match rln.generate_proof(input_data) {
+    let input_data = <&[u8]>::from(unsafe { &*input_buffer });
+    let mut output_data: Vec<u8> = Vec::new();
+    match rln.generate_proof(input_data, &mut output_data) {
         Ok(proof_data) => proof_data,
         Err(_) => return false,
     };
-    unsafe { *proof_buffer = Buffer::from(&proof_data[..]) };
-    std::mem::forget(proof_data);
+    unsafe { *output_buffer = Buffer::from(&output_data[..]) };
+    std::mem::forget(output_data);
     true
 }
 
@@ -66,9 +67,9 @@ pub extern "C" fn verify(
     public_inputs_buffer: *const Buffer,
     result_ptr: *mut u32,
 ) -> bool {
+    let rln = unsafe { &*ctx };
     let proof_data = <&[u8]>::from(unsafe { &*proof_buffer });
     let public_inputs_data = <&[u8]>::from(unsafe { &*public_inputs_buffer });
-    let rln = unsafe { &*ctx };
     if match rln.verify(proof_data, public_inputs_data) {
         Ok(verified) => verified,
         Err(_) => return false,
@@ -87,10 +88,11 @@ pub extern "C" fn hash(
     input_len: *const usize,
     output_buffer: *mut Buffer,
 ) -> bool {
-    let input_data = <&[u8]>::from(unsafe { &*inputs_buffer });
     let rln = unsafe { &*ctx };
+    let input_data = <&[u8]>::from(unsafe { &*inputs_buffer });
     let n: usize = unsafe { *input_len };
-    let output_data = match rln.hash(input_data, n) {
+    let mut output_data: Vec<u8> = Vec::new();
+    match rln.hash(input_data, n, &mut output_data) {
         Ok(output_data) => output_data,
         Err(_) => return false,
     };

@@ -85,16 +85,16 @@ where
         PoseidonHasher::new(self.poseidon_params.clone())
     }
 
-    pub fn hash<R: Read>(&self, inputs: R, n: usize) -> io::Result<Vec<u8>> {
+    pub fn hash<R: Read, W: Write>(&self, input: R, n: usize, mut output: W) -> io::Result<()> {
         let mut hasher = self.hasher();
-        let inputs: Vec<E::Fr> = read_inputs::<R, E>(inputs, n)?;
-        let output = hasher.hash(inputs);
-        let mut output_data: Vec<u8> = Vec::new();
-        output.into_repr().write_le(&mut output_data)?;
-        Ok(output_data)
+        let input: Vec<E::Fr> = read_inputs::<R, E>(input, n)?;
+        let result = hasher.hash(input);
+        // let mut output_data: Vec<u8> = Vec::new();
+        result.into_repr().write_le(&mut output)?;
+        Ok(())
     }
 
-    pub fn generate_proof<R: Read>(&self, input: R) -> io::Result<Vec<u8>> {
+    pub fn generate_proof<R: Read, W: Write>(&self, input: R, mut output: W) -> io::Result<()> {
         use rand::chacha::ChaChaRng;
         use rand::SeedableRng;
         let mut rng = ChaChaRng::new_unseeded();
@@ -106,12 +106,9 @@ where
             hasher: circuit_hasher.clone(),
         };
         let proof = create_random_proof(circuit, &self.circuit_parameters, &mut rng).unwrap();
-        let mut output: Vec<u8> = Vec::new();
-
         write_uncompressed_proof(proof, &mut output)?;
-        // proof.write(&mut output).unwrap();
-
-        Ok(output)
+        // proof.write(&mut w).unwrap();
+        Ok(())
     }
 
     pub fn verify<R: Read>(&self, uncompresed_proof: R, raw_public_inputs: R) -> io::Result<bool> {

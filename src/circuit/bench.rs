@@ -163,8 +163,11 @@ where
         let inputs = self.valid_inputs();
         inputs.write(&mut raw_inputs).unwrap();
 
+        let mut proof: Vec<u8> = Vec::new();
         let now = Instant::now();
-        let proof = self.rln.generate_proof(raw_inputs.as_slice()).unwrap();
+        self.rln
+            .generate_proof(raw_inputs.as_slice(), &mut proof)
+            .unwrap();
         let prover_time = now.elapsed().as_millis() as f64 / 1000.0;
 
         let mut raw_public_inputs: Vec<u8> = Vec::new();
