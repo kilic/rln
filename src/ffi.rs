@@ -28,7 +28,7 @@ impl<'a> From<&Buffer> for &'a [u8] {
 }
 
 #[no_mangle]
-pub unsafe extern "C" fn new_circuit_from_params(
+pub extern "C" fn new_circuit_from_params(
     merkle_depth: usize,
     parameters_buffer: *const Buffer,
     ctx: *mut *mut RLN<Bn256>,
@@ -38,12 +38,12 @@ pub unsafe extern "C" fn new_circuit_from_params(
         Ok(rln) => rln,
         Err(_) => return false,
     };
-    *ctx = Box::into_raw(Box::new(rln));
+    unsafe { *ctx = Box::into_raw(Box::new(rln)) };
     true
 }
 
 #[no_mangle]
-pub unsafe extern "C" fn generate_proof(
+pub extern "C" fn generate_proof(
     ctx: *const RLN<Bn256>,
     input_buffer: *const Buffer,
     proof_buffer: *mut Buffer,
@@ -60,7 +60,7 @@ pub unsafe extern "C" fn generate_proof(
 }
 
 #[no_mangle]
-pub unsafe extern "C" fn verify(
+pub extern "C" fn verify(
     ctx: *const RLN<Bn256>,
     proof_buffer: *const Buffer,
     public_inputs_buffer: *const Buffer,
@@ -81,7 +81,7 @@ pub unsafe extern "C" fn verify(
 }
 
 #[no_mangle]
-pub unsafe extern "C" fn hash(
+pub extern "C" fn hash(
     ctx: *const RLN<Bn256>,
     inputs_buffer: *const Buffer,
     input_len: *const usize,
@@ -89,7 +89,7 @@ pub unsafe extern "C" fn hash(
 ) -> bool {
     let input_data = <&[u8]>::from(unsafe { &*inputs_buffer });
     let rln = unsafe { &*ctx };
-    let n: usize = *input_len;
+    let n: usize = unsafe { *input_len };
     let output_data = match rln.hash(input_data, n) {
         Ok(output_data) => output_data,
         Err(_) => return false,
@@ -100,7 +100,7 @@ pub unsafe extern "C" fn hash(
 }
 
 #[no_mangle]
-pub unsafe extern "C" fn key_gen(ctx: *const RLN<Bn256>, keypair_buffer: *mut Buffer) -> bool {
+pub extern "C" fn key_gen(ctx: *const RLN<Bn256>, keypair_buffer: *mut Buffer) -> bool {
     let rln = unsafe { &*ctx };
     let mut output_data: Vec<u8> = Vec::new();
     match rln.key_gen(&mut output_data) {
