@@ -17,7 +17,6 @@ where
     E: Engine,
 {
     circuit_parameters: Parameters<E>,
-    circuit_hasher: PoseidonCircuit<E>,
     poseidon_params: PoseidonParams<E>,
     merkle_depth: usize,
 }
@@ -45,10 +44,8 @@ where
         circuit_parameters: Parameters<E>,
         poseidon_params: PoseidonParams<E>,
     ) -> RLN<E> {
-        let circuit_hasher = PoseidonCircuit::new(poseidon_params.clone());
         RLN {
             circuit_parameters,
-            circuit_hasher,
             poseidon_params,
             merkle_depth,
         }
@@ -103,9 +100,10 @@ where
         let mut rng = ChaChaRng::new_unseeded();
         let inputs = RLNInputs::<E>::read(input)?;
         assert_eq!(self.merkle_depth, inputs.merkle_depth());
+        let circuit_hasher = PoseidonCircuit::new(self.poseidon_params.clone());
         let circuit = RLNCircuit {
             inputs: inputs.clone(),
-            hasher: self.circuit_hasher.clone(),
+            hasher: circuit_hasher.clone(),
         };
         let proof = create_random_proof(circuit, &self.circuit_parameters, &mut rng).unwrap();
         let mut output: Vec<u8> = Vec::new();
