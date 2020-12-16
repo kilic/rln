@@ -125,6 +125,16 @@ where
         Ok(success)
     }
 
+    pub fn key_gen<W: Write>(&self, mut w: W) -> io::Result<()> {
+        let mut rng = XorShiftRng::from_seed([0x3dbe6258, 0x8d313d76, 0x3237db17, 0xe5bc0654]);
+        let mut hasher = self.hasher();
+        let secret = E::Fr::rand(&mut rng);
+        let public: E::Fr = hasher.hash(vec![secret.clone()]);
+        secret.into_repr().write_le(&mut w)?;
+        public.into_repr().write_le(&mut w)?;
+        Ok(())
+    }
+
     pub fn export_verifier_key<W: Write>(&self, w: W) -> io::Result<()> {
         self.circuit_parameters.vk.write(w)
     }

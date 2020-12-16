@@ -1,17 +1,14 @@
-use crate::public::RLN;
+use crate::{circuit::rln, public::RLN};
 use bellman::pairing::bn256::Bn256;
 use std::slice;
 
 /// Buffer struct is taken from
 /// https://github.com/celo-org/celo-threshold-bls-rs/blob/master/crates/threshold-bls-ffi/src/ffi.rs
 
-/// Data structure which is used to store buffers of varying length
 #[repr(C)]
 #[derive(Clone, Debug, PartialEq)]
 pub struct Buffer {
-    /// Pointer to the message
     pub ptr: *const u8,
-    /// The length of the buffer
     pub len: usize,
 }
 
@@ -98,6 +95,19 @@ pub unsafe extern "C" fn hash(
         Err(_) => return false,
     };
     unsafe { *output_buffer = Buffer::from(&output_data[..]) };
+    std::mem::forget(output_data);
+    true
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn key_gen(ctx: *const RLN<Bn256>, keypair_buffer: *mut Buffer) -> bool {
+    let rln = unsafe { &*ctx };
+    let mut output_data: Vec<u8> = Vec::new();
+    match rln.key_gen(&mut output_data) {
+        Ok(_) => (),
+        Err(_) => return false,
+    }
+    unsafe { *keypair_buffer = Buffer::from(&output_data[..]) };
     std::mem::forget(output_data);
     true
 }
@@ -226,5 +236,36 @@ mod tests {
         let result_buffer = unsafe { result_buffer.assume_init() };
         let result_data = <&[u8]>::from(&result_buffer);
         assert_eq!(expected_data.as_slice(), result_data);
+    }
+
+    #[test]
+    fn test_keygen_ffi() {
+        let rln_test = rln_test();
+
+        let mut circuit_parameters: Vec<u8> = Vec::new();
+        rln_test
+            .export_circuit_parameters(&mut circuit_parameters)
+            .unwrap();
+        let mut hasher = rln_test.hasher();
+
+        let rln_pointer = rln_pointer(circuit_parameters);
+        let rln_pointer = unsafe { &*rln_pointer.assume_init() };
+
+        let mut keypair_buffer = MaybeUninit::<Buffer>::uninit();
+
+        let success = unsafe { key_gen(rln_pointer, keypair_buffer.as_mut_ptr()) };
+        assert!(success, "proof generation failed");
+
+        let keypair_buffer = unsafe { keypair_buffer.assume_init() };
+        let mut keypair_data = <&[u8]>::from(&keypair_buffer);
+
+        let mut buf = <Fr as PrimeField>::Repr::default();
+        buf.read_le(&mut keypair_data).unwrap();
+        let secret = Fr::from_repr(buf).unwrap();
+        buf.read_le(&mut keypair_data).unwrap();
+        let public = Fr::from_repr(buf).unwrap();
+        let expected_public: Fr = hasher.hash(vec![secret]);
+
+        assert_eq!(public, expected_public);
     }
 }
