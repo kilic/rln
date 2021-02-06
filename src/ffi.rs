@@ -30,15 +30,27 @@ impl<'a> From<&Buffer> for &'a [u8] {
 #[no_mangle]
 pub extern "C" fn new_circuit_from_params(
     merkle_depth: usize,
+    index: usize,
     parameters_buffer: *const Buffer,
     ctx: *mut *mut RLN<Bn256>,
 ) -> bool {
     let buffer = <&[u8]>::from(unsafe { &*parameters_buffer });
-    let rln = match RLN::<Bn256>::new_with_raw_params(merkle_depth, buffer, None) {
+    let rln = match RLN::<Bn256>::new_with_raw_params(merkle_depth, index, buffer, None) {
         Ok(rln) => rln,
         Err(_) => return false,
     };
     unsafe { *ctx = Box::into_raw(Box::new(rln)) };
+    true
+}
+
+#[no_mangle]
+pub extern "C" fn update_next(ctx: *mut RLN<Bn256>, input_buffer: *const Buffer) -> bool {
+    let rln = unsafe { &mut *ctx };
+    let input_data = <&[u8]>::from(unsafe { &*input_buffer });
+    match rln.update_next(input_data) {
+        Ok(proof_data) => proof_data,
+        Err(_) => return false,
+    };
     true
 }
 
@@ -63,14 +75,12 @@ pub extern "C" fn generate_proof(
 #[no_mangle]
 pub extern "C" fn verify(
     ctx: *const RLN<Bn256>,
-    proof_buffer: *const Buffer,
-    public_inputs_buffer: *const Buffer,
+    proof_buffer: *mut Buffer,
     result_ptr: *mut u32,
 ) -> bool {
     let rln = unsafe { &*ctx };
     let proof_data = <&[u8]>::from(unsafe { &*proof_buffer });
-    let public_inputs_data = <&[u8]>::from(unsafe { &*public_inputs_buffer });
-    if match rln.verify(proof_data, public_inputs_data) {
+    if match rln.verify(proof_data) {
         Ok(verified) => verified,
         Err(_) => return false,
     } {
@@ -120,15 +130,20 @@ use std::io::{self, Read, Write};
 
 #[cfg(test)]
 mod tests {
-    use crate::circuit::bench;
-    use crate::poseidon::PoseidonParams;
+    use crate::{circuit::bench, public::RLNSignal};
+    use crate::{poseidon::PoseidonParams, public};
     use bellman::pairing::bn256::{Bn256, Fr};
+    use rand::{Rand, SeedableRng, XorShiftRng};
 
     use super::*;
     use std::mem::MaybeUninit;
 
     fn merkle_depth() -> usize {
         3usize
+    }
+
+    fn index() -> usize {
+        2usize
     }
 
     fn rln_test() -> bench::RLNTest<Bn256> {
@@ -141,11 +156,13 @@ mod tests {
     fn rln_pointer(circuit_parameters: Vec<u8>) -> MaybeUninit<*mut RLN<Bn256>> {
         // restore this new curcuit with bindings
         let merkle_depth = merkle_depth();
+        let index = index();
         let circuit_parameters_buffer = &Buffer::from(circuit_parameters.as_ref());
         let mut rln_pointer = MaybeUninit::<*mut RLN<Bn256>>::uninit();
         unsafe {
             new_circuit_from_params(
                 merkle_depth,
+                index,
                 circuit_parameters_buffer,
                 rln_pointer.as_mut_ptr(),
             )
@@ -156,55 +173,83 @@ mod tests {
 
     #[test]
     fn test_proof_ffi() {
-        let rln_test = rln_test();
+        let mut rng = XorShiftRng::from_seed([0x3dbe6258, 0x8d313d76, 0x3237db17, 0xe5bc0654]);
 
+        // setup new rln instance
+        let rln_test = rln_test();
         let mut circuit_parameters: Vec<u8> = Vec::new();
         rln_test
             .export_circuit_parameters(&mut circuit_parameters)
             .unwrap();
-
         let rln_pointer = rln_pointer(circuit_parameters);
-        let rln_pointer = unsafe { &*rln_pointer.assume_init() };
+        let rln_pointer = unsafe { &mut *rln_pointer.assume_init() };
+        let index = index();
 
+        // generate new key pair
+        let mut keypair_buffer = MaybeUninit::<Buffer>::uninit();
+        let success = unsafe { key_gen(rln_pointer, keypair_buffer.as_mut_ptr()) };
+        assert!(success, "key generation failed");
+        let keypair_buffer = unsafe { keypair_buffer.assume_init() };
+        let mut keypair_data = <&[u8]>::from(&keypair_buffer);
+        let mut buf = <Fr as PrimeField>::Repr::default();
+        buf.read_le(&mut keypair_data).unwrap();
+        let id_key = Fr::from_repr(buf).unwrap();
+        buf.read_le(&mut keypair_data).unwrap();
+        let public_key = Fr::from_repr(buf).unwrap();
+
+        // insert members
+        for i in 0..index + 1 {
+            let new_member: Fr;
+            if i == index {
+                new_member = public_key;
+            } else {
+                new_member = Fr::rand(&mut rng);
+            }
+            let mut input_data: Vec<u8> = Vec::new();
+            new_member.into_repr().write_le(&mut input_data).unwrap();
+            let input_buffer = &Buffer::from(input_data.as_ref());
+
+            let success = update_next(rln_pointer, input_buffer);
+            assert!(success, "update with new pubkey failed");
+        }
+
+        // create signal
+        let epoch = Fr::rand(&mut rng);
+        let signal_hash = Fr::rand(&mut rng);
+        let inputs = RLNSignal::<Bn256> {
+            epoch: epoch,
+            hash: signal_hash,
+            id_key: id_key,
+        };
+
+        // generate proof
         let mut inputs_data: Vec<u8> = Vec::new();
-        let inputs = rln_test.valid_inputs();
         inputs.write(&mut inputs_data).unwrap();
         let inputs_buffer = &Buffer::from(inputs_data.as_ref());
-
         let mut proof_buffer = MaybeUninit::<Buffer>::uninit();
-
         let success =
             unsafe { generate_proof(rln_pointer, inputs_buffer, proof_buffer.as_mut_ptr()) };
         assert!(success, "proof generation failed");
+        let mut proof_buffer = unsafe { proof_buffer.assume_init() };
 
-        let proof_buffer = unsafe { proof_buffer.assume_init() };
-
-        let mut public_inputs_data: Vec<u8> = Vec::new();
-        inputs.write_public_inputs(&mut public_inputs_data).unwrap();
-        let public_inputs_buffer = &Buffer::from(public_inputs_data.as_ref());
-
+        // verify proof
         let mut result = 0u32;
         let result_ptr = &mut result as *mut u32;
-
-        let success =
-            unsafe { verify(rln_pointer, &proof_buffer, public_inputs_buffer, result_ptr) };
-        assert!(success, "verification operation failed");
+        let success = unsafe { verify(rln_pointer, &mut proof_buffer, result_ptr) };
+        assert!(success, "verification failed");
         assert_eq!(0, result);
     }
 
     #[test]
     fn test_hash_ffi() {
         let rln_test = rln_test();
-
         let mut circuit_parameters: Vec<u8> = Vec::new();
         rln_test
             .export_circuit_parameters(&mut circuit_parameters)
             .unwrap();
-        let mut hasher = rln_test.hasher();
-
+        let hasher = rln_test.hasher();
         let rln_pointer = rln_pointer(circuit_parameters);
         let rln_pointer = unsafe { &*rln_pointer.assume_init() };
-
         let mut input_data: Vec<u8> = Vec::new();
 
         let inputs: Vec<Fr> = ["1", "2"]
@@ -248,7 +293,7 @@ mod tests {
         rln_test
             .export_circuit_parameters(&mut circuit_parameters)
             .unwrap();
-        let mut hasher = rln_test.hasher();
+        let hasher = rln_test.hasher();
 
         let rln_pointer = rln_pointer(circuit_parameters);
         let rln_pointer = unsafe { &*rln_pointer.assume_init() };

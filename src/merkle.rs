@@ -1,15 +1,111 @@
 use crate::poseidon::{Poseidon as Hasher, PoseidonParams};
 use sapling_crypto::bellman::pairing::ff::{Field, PrimeField, PrimeFieldRepr};
 use sapling_crypto::bellman::pairing::Engine;
-use std::collections::HashMap;
+use std::io::{self, Error, ErrorKind};
+use std::{collections::HashMap, hash::Hash};
+
+enum SyncMode {
+    Bootstarp,
+    Maintain,
+}
+
+pub struct IncrementalMerkleTree<E>
+where
+    E: Engine,
+{
+    pub self_index: usize,
+    pub current_index: usize,
+    merkle_tree: MerkleTree<E>,
+}
+
+impl<E> IncrementalMerkleTree<E>
+where
+    E: Engine,
+{
+    pub fn empty(hasher: Hasher<E>, depth: usize, self_index: usize) -> Self {
+        let mut zero: Vec<E::Fr> = Vec::with_capacity(depth + 1);
+        zero.push(E::Fr::from_str("0").unwrap());
+        for i in 0..depth {
+            zero.push(hasher.hash([zero[i]; 2].to_vec()));
+        }
+        zero.reverse();
+        let merkle_tree = MerkleTree {
+            hasher: hasher,
+            zero: zero.clone(),
+            depth: depth,
+            nodes: HashMap::new(),
+        };
+        let current_index: usize = 0;
+        IncrementalMerkleTree {
+            self_index,
+            current_index,
+            merkle_tree,
+        }
+    }
+
+    pub fn update_next(&mut self, leaf: E::Fr) {
+        // println!("{}", self.get_root());
+        self.merkle_tree.update(self.current_index, leaf);
+        self.current_index += 1;
+        // println!("{}", self.get_root());
+    }
+
+    pub fn delete(&mut self, index: usize) -> io::Result<()> {
+        if index >= self.current_index {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidInput,
+                "index exceeds incremental index",
+            ));
+        }
+        let zero = E::Fr::from_str("0").unwrap();
+        self.merkle_tree.update(index, zero);
+        Ok(())
+    }
+
+    pub fn get_witness(&self, index: usize) -> io::Result<Vec<(E::Fr, bool)>> {
+        if index >= self.current_index {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidInput,
+                "index exceeds incremental index",
+            ));
+        }
+        self.merkle_tree.get_witness(index)
+    }
+
+    pub fn get_auth_path(&self) -> Vec<(E::Fr, bool)> {
+        self.merkle_tree.get_witness(self.self_index).unwrap()
+    }
+
+    pub fn hash(&self, inputs: Vec<E::Fr>) -> E::Fr {
+        self.merkle_tree.hasher.hash(inputs)
+    }
+
+    pub fn check_inclusion(
+        &self,
+        witness: Vec<(E::Fr, bool)>,
+        leaf_index: usize,
+    ) -> io::Result<bool> {
+        if leaf_index >= self.current_index {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidInput,
+                "index exceeds incremental index",
+            ));
+        }
+        self.merkle_tree.check_inclusion(witness, leaf_index)
+    }
+
+    pub fn get_root(&self) -> E::Fr {
+        return self.merkle_tree.get_root();
+    }
+}
 
 pub struct MerkleTree<E>
 where
     E: Engine,
 {
     pub hasher: Hasher<E>,
+    pub depth: usize,
     zero: Vec<E::Fr>,
-    depth: usize,
     nodes: HashMap<(usize, usize), E::Fr>,
 }
 
@@ -17,7 +113,7 @@ impl<E> MerkleTree<E>
 where
     E: Engine,
 {
-    pub fn empty(mut hasher: Hasher<E>, depth: usize) -> Self {
+    pub fn empty(hasher: Hasher<E>, depth: usize) -> Self {
         let mut zero: Vec<E::Fr> = Vec::with_capacity(depth + 1);
         zero.push(E::Fr::from_str("0").unwrap());
         for i in 0..depth {
@@ -32,11 +128,71 @@ where
         }
     }
 
+    pub fn set_size(&self) -> usize {
+        1 << self.depth
+    }
+
+    pub fn update(&mut self, index: usize, leaf: E::Fr) {
+        self.nodes.insert((self.depth, index), leaf);
+        self.recalculate_from(index);
+    }
+
+    pub fn check_inclusion(&self, witness: Vec<(E::Fr, bool)>, index: usize) -> io::Result<bool> {
+        if index >= self.set_size() {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidInput,
+                "index exceeds set size",
+            ));
+        }
+        let mut acc = self.get_node(self.depth, index);
+
+        for w in witness.into_iter() {
+            if w.1 {
+                acc = self.hasher.hash(vec![acc, w.0]);
+            } else {
+                acc = self.hasher.hash(vec![w.0, acc]);
+            }
+        }
+        Ok(acc.eq(&self.get_root()))
+    }
+
+    pub fn get_root(&self) -> E::Fr {
+        return self.get_node(0, 0);
+    }
+
+    pub fn get_witness(&self, index: usize) -> io::Result<Vec<(E::Fr, bool)>> {
+        if index >= self.set_size() {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidInput,
+                "index exceeds set size",
+            ));
+        }
+        let mut witness = Vec::<(E::Fr, bool)>::with_capacity(self.depth);
+        let mut i = index;
+        let mut depth = self.depth;
+        loop {
+            i ^= 1;
+            witness.push((self.get_node(depth, i), (i & 1 == 1)));
+            i >>= 1;
+            depth -= 1;
+            if depth == 0 {
+                break;
+            }
+        }
+        assert_eq!(i, 0);
+        Ok(witness)
+    }
+
     fn get_node(&self, depth: usize, index: usize) -> E::Fr {
-        *self
+        let node = *self
             .nodes
             .get(&(depth, index))
-            .unwrap_or_else(|| &self.zero[depth])
+            .unwrap_or_else(|| &self.zero[depth]);
+        node
+    }
+
+    fn get_leaf(&self, index: usize) -> E::Fr {
+        self.get_node(self.depth, index)
     }
 
     fn hash_couple(&mut self, depth: usize, index: usize) -> E::Fr {
@@ -45,8 +201,8 @@ where
             .hash([self.get_node(depth, b), self.get_node(depth, b + 1)].to_vec())
     }
 
-    fn recalculate_from(&mut self, leaf_index: usize) {
-        let mut i = leaf_index;
+    fn recalculate_from(&mut self, index: usize) {
+        let mut i = index;
         let mut depth = self.depth;
         loop {
             let h = self.hash_couple(depth, i);
@@ -60,95 +216,20 @@ where
         assert_eq!(depth, 0);
         assert_eq!(i, 0);
     }
-
-    pub fn insert(&mut self, leaf_index: usize, new: E::Fr, old: Option<E::Fr>) {
-        let d = self.depth;
-        {
-            if old.is_some() {
-                let old = old.unwrap();
-                let t = self.get_node(d, leaf_index);
-                if t.is_zero() {
-                    assert!(old.is_zero());
-                } else {
-                    assert!(t.eq(&self.hasher.hash(vec![old])));
-                }
-            }
-        };
-        let leaf = self.hasher.hash(vec![new]);
-        self.update(leaf_index, leaf);
-    }
-
-    pub fn update(&mut self, leaf_index: usize, leaf: E::Fr) {
-        self.nodes.insert((self.depth, leaf_index), leaf);
-        self.recalculate_from(leaf_index);
-    }
-
-    pub fn root(&self) -> E::Fr {
-        return self.get_node(0, 0);
-    }
-
-    pub fn witness(&mut self, leaf_index: usize) -> Vec<(E::Fr, bool)> {
-        let mut witness = Vec::<(E::Fr, bool)>::with_capacity(self.depth);
-        let mut i = leaf_index;
-        let mut depth = self.depth;
-        loop {
-            i ^= 1;
-            witness.push((self.get_node(depth, i), (i & 1 == 1)));
-            i >>= 1;
-            depth -= 1;
-            if depth == 0 {
-                break;
-            }
-        }
-        assert_eq!(i, 0);
-        witness
-    }
-
-    pub fn check_inclusion(
-        &mut self,
-        witness: Vec<(E::Fr, bool)>,
-        leaf_index: usize,
-        data: E::Fr,
-    ) -> bool {
-        let mut acc = self.hasher.hash(vec![data]);
-        {
-            assert!(self.get_node(self.depth, leaf_index).eq(&acc));
-        }
-        for w in witness.into_iter() {
-            if w.1 {
-                acc = self.hasher.hash(vec![acc, w.0]);
-            } else {
-                acc = self.hasher.hash(vec![w.0, acc]);
-            }
-        }
-        acc.eq(&self.root())
-    }
 }
 
 #[test]
 fn test_merkle_set() {
-    let zero = Some(Fr::zero());
     let data: Vec<Fr> = (0..8)
         .map(|s| Fr::from_str(&format!("{}", s)).unwrap())
         .collect();
     use sapling_crypto::bellman::pairing::bn256::{Bn256, Fr, FrRepr};
     let params = PoseidonParams::<Bn256>::new(8, 55, 3, None, None, None);
     let hasher = Hasher::new(params);
-    let mut set = MerkleTree::empty(hasher, 3);
+    let mut set = MerkleTree::empty(hasher.clone(), 3);
     let leaf_index = 6;
-    set.insert(leaf_index, data[0], zero);
-    let witness = set.witness(leaf_index);
-    assert!(set.check_inclusion(witness, leaf_index, data[0]));
-}
-
-#[test]
-fn test_merkle_zeros() {
-    use sapling_crypto::bellman::pairing::bn256::{Bn256, Fr, FrRepr};
-    let params = PoseidonParams::<Bn256>::new(8, 55, 3, None, None, None);
-    let hasher = Hasher::new(params);
-    let mut set = MerkleTree::empty(hasher, 32);
-    set.insert(5, Fr::from_str("1").unwrap(), Some(Fr::zero()));
-    println!("{}", set.root());
-    set.insert(6, Fr::from_str("2").unwrap(), Some(Fr::zero()));
-    println!("{}", set.root());
+    let leaf = hasher.hash(vec![data[0]]);
+    set.update(leaf_index, leaf);
+    let witness = set.get_witness(leaf_index).unwrap();
+    assert!(set.check_inclusion(witness, leaf_index).unwrap());
 }

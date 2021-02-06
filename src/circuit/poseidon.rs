@@ -388,7 +388,7 @@ fn test_poseidon_circuit() {
         .alloc(cs.namespace(|| "hash alloc"), allocated_inputs)
         .unwrap();
     let result = res_allocated.get_value().unwrap();
-    let mut poseidon = PoseidonHasher::new(params.clone());
+    let poseidon = PoseidonHasher::new(params.clone());
     let expected = poseidon.hash(inputs);
 
     assert_eq!(result, expected);
