@@ -44,14 +44,22 @@ pub extern "C" fn new_circuit_from_params(
 }
 
 #[no_mangle]
-pub extern "C" fn update_next(ctx: *mut RLN<Bn256>, input_buffer: *const Buffer) -> bool {
+pub extern "C" fn update_next_member(ctx: *mut RLN<Bn256>, input_buffer: *const Buffer) -> bool {
     let rln = unsafe { &mut *ctx };
     let input_data = <&[u8]>::from(unsafe { &*input_buffer });
-    match rln.update_next(input_data) {
-        Ok(proof_data) => proof_data,
-        Err(_) => return false,
-    };
-    true
+    match rln.update_next_member(input_data) {
+        Ok(_) => true,
+        Err(_) => false,
+    }
+}
+
+#[no_mangle]
+pub extern "C" fn delete_member(ctx: *mut RLN<Bn256>, index: usize) -> bool {
+    let rln = unsafe { &mut *ctx };
+    match rln.delete_member(index) {
+        Ok(_) => true,
+        Err(_) => false,
+    }
 }
 
 #[no_mangle]
@@ -209,35 +217,46 @@ mod tests {
             new_member.into_repr().write_le(&mut input_data).unwrap();
             let input_buffer = &Buffer::from(input_data.as_ref());
 
-            let success = update_next(rln_pointer, input_buffer);
+            let success = update_next_member(rln_pointer, input_buffer);
             assert!(success, "update with new pubkey failed");
         }
 
-        // create signal
-        let epoch = Fr::rand(&mut rng);
-        let signal_hash = Fr::rand(&mut rng);
-        let inputs = RLNSignal::<Bn256> {
-            epoch: epoch,
-            hash: signal_hash,
-            id_key: id_key,
+        let mut gen_proof_and_verify = |rln_pointer: *const RLN<Bn256>| {
+            // create signal
+            let epoch = Fr::rand(&mut rng);
+            let signal_hash = Fr::rand(&mut rng);
+            let inputs = RLNSignal::<Bn256> {
+                epoch: epoch,
+                hash: signal_hash,
+                id_key: id_key,
+            };
+
+            // generate proof
+            let mut inputs_data: Vec<u8> = Vec::new();
+            inputs.write(&mut inputs_data).unwrap();
+            let inputs_buffer = &Buffer::from(inputs_data.as_ref());
+            let mut proof_buffer = MaybeUninit::<Buffer>::uninit();
+            let success =
+                unsafe { generate_proof(rln_pointer, inputs_buffer, proof_buffer.as_mut_ptr()) };
+            assert!(success, "proof generation failed");
+            let mut proof_buffer = unsafe { proof_buffer.assume_init() };
+
+            // verify proof
+            let mut result = 0u32;
+            let result_ptr = &mut result as *mut u32;
+            let success = unsafe { verify(rln_pointer, &mut proof_buffer, result_ptr) };
+            assert!(success, "verification failed");
+            assert_eq!(0, result);
         };
 
-        // generate proof
-        let mut inputs_data: Vec<u8> = Vec::new();
-        inputs.write(&mut inputs_data).unwrap();
-        let inputs_buffer = &Buffer::from(inputs_data.as_ref());
-        let mut proof_buffer = MaybeUninit::<Buffer>::uninit();
-        let success =
-            unsafe { generate_proof(rln_pointer, inputs_buffer, proof_buffer.as_mut_ptr()) };
-        assert!(success, "proof generation failed");
-        let mut proof_buffer = unsafe { proof_buffer.assume_init() };
+        gen_proof_and_verify(rln_pointer);
 
-        // verify proof
-        let mut result = 0u32;
-        let result_ptr = &mut result as *mut u32;
-        let success = unsafe { verify(rln_pointer, &mut proof_buffer, result_ptr) };
-        assert!(success, "verification failed");
-        assert_eq!(0, result);
+        // delete 0th member
+        let success = delete_member(rln_pointer, 0);
+        assert!(success, "deletion failed");
+
+        // gen proof & verify once more
+        gen_proof_and_verify(rln_pointer);
     }
 
     #[test]

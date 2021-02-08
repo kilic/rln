@@ -91,7 +91,7 @@ where
         // B. insert to the membership tree
 
         let id_index = 6; // any number below 2^depth will work
-        membership_tree.update(id_index, id_comm);
+        membership_tree.update(id_index, id_comm).unwrap();
 
         // C.1 get membership witness
 
@@ -170,6 +170,7 @@ where
         self.rln
             .generate_proof(raw_inputs.as_slice(), &mut proof)
             .unwrap();
+
         let prover_time = now.elapsed().as_millis() as f64 / 1000.0;
 
         let mut raw_public_inputs: Vec<u8> = Vec::new();

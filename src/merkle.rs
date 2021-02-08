@@ -43,22 +43,15 @@ where
         }
     }
 
-    pub fn update_next(&mut self, leaf: E::Fr) {
-        // println!("{}", self.get_root());
-        self.merkle_tree.update(self.current_index, leaf);
+    pub fn update_next(&mut self, leaf: E::Fr) -> io::Result<()> {
+        self.merkle_tree.update(self.current_index, leaf)?;
         self.current_index += 1;
-        // println!("{}", self.get_root());
+        Ok(())
     }
 
     pub fn delete(&mut self, index: usize) -> io::Result<()> {
-        if index >= self.current_index {
-            return Err(io::Error::new(
-                io::ErrorKind::InvalidInput,
-                "index exceeds incremental index",
-            ));
-        }
         let zero = E::Fr::from_str("0").unwrap();
-        self.merkle_tree.update(index, zero);
+        self.merkle_tree.update(index, zero)?;
         Ok(())
     }
 
@@ -132,9 +125,16 @@ where
         1 << self.depth
     }
 
-    pub fn update(&mut self, index: usize, leaf: E::Fr) {
+    pub fn update(&mut self, index: usize, leaf: E::Fr) -> io::Result<()> {
+        if index >= self.set_size() {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidInput,
+                "index exceeds set size",
+            ));
+        }
         self.nodes.insert((self.depth, index), leaf);
         self.recalculate_from(index);
+        Ok(())
     }
 
     pub fn check_inclusion(&self, witness: Vec<(E::Fr, bool)>, index: usize) -> io::Result<bool> {
@@ -229,7 +229,7 @@ fn test_merkle_set() {
     let mut set = MerkleTree::empty(hasher.clone(), 3);
     let leaf_index = 6;
     let leaf = hasher.hash(vec![data[0]]);
-    set.update(leaf_index, leaf);
+    set.update(leaf_index, leaf).unwrap();
     let witness = set.get_witness(leaf_index).unwrap();
     assert!(set.check_inclusion(witness, leaf_index).unwrap());
 }

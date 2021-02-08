@@ -132,12 +132,17 @@ where
         ))
     }
 
-    pub fn update_next<R: Read>(&mut self, input: R) -> io::Result<()> {
+    pub fn update_next_member<R: Read>(&mut self, input: R) -> io::Result<()> {
         let mut buf = <E::Fr as PrimeField>::Repr::default();
         buf.read_le(input)?;
         let leaf =
             E::Fr::from_repr(buf).map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))?;
-        self.tree.update_next(leaf);
+        self.tree.update_next(leaf)?;
+        Ok(())
+    }
+
+    pub fn delete_member(&mut self, index: usize) -> io::Result<()> {
+        self.tree.delete(index)?;
         Ok(())
     }
 
@@ -149,17 +154,18 @@ where
         PoseidonHasher::new(self.poseidon_params.clone())
     }
 
+    ///  expect one or two scalar field element in 32 bytes in `input`
+    /// `output` is a 32 scalar field element in 32 bytes
     pub fn hash<R: Read, W: Write>(&self, input: R, n: usize, mut output: W) -> io::Result<()> {
         let hasher = self.hasher();
         let input: Vec<E::Fr> = read_inputs::<R, E>(input, n)?;
         let result = hasher.hash(input);
-        // let mut output_data: Vec<u8> = Vec::new();
         result.into_repr().write_le(&mut output)?;
         Ok(())
     }
 
-    /// input: |epoch<32>|signal_hash<32>|id_key<32>|
-    /// output: |proof<?>|root<32>|epoch<32>|share_x<32>|share_y<32>|nullifier<32>|
+    /// expect `input` serialized as |epoch<32>|signal_hash<32>|id_key<32>|
+    /// `output` is proof data serialized as |proof<416>|root<32>|epoch<32>|share_x<32>|share_y<32>|nullifier<32>|
     pub fn generate_proof<R: Read, W: Write>(&self, input: R, mut output: W) -> io::Result<()> {
         use rand::chacha::ChaChaRng;
         use rand::SeedableRng;
@@ -208,7 +214,8 @@ where
         Ok(())
     }
 
-    /// proof: |proof<?>|root<32>|epoch<32>|share_x<32>|share_y<32>|nullifier<32>|
+    /// `proof_data` is the proof along with public inputs serialized as:
+    /// |proof<416>|root<32>|epoch<32>|share_x<32>|share_y<32>|nullifier<32>|
     pub fn verify<R: Read>(&self, mut proof_data: R) -> io::Result<bool> {
         let proof = read_uncompressed_proof(&mut proof_data)?;
         let public_inputs = RLNInputs::<E>::read_public_inputs(&mut proof_data)?;
@@ -218,13 +225,14 @@ where
         Ok(success)
     }
 
-    pub fn key_gen<W: Write>(&self, mut w: W) -> io::Result<()> {
+    /// `output` is seralized as |secret<32>|public<32>|
+    pub fn key_gen<W: Write>(&self, mut output: W) -> io::Result<()> {
         let mut rng = XorShiftRng::from_seed([0x3dbe6258, 0x8d313d76, 0x3237db17, 0xe5bc0654]);
         let hasher = self.hasher();
         let secret = E::Fr::rand(&mut rng);
         let public: E::Fr = hasher.hash(vec![secret.clone()]);
-        secret.into_repr().write_le(&mut w)?;
-        public.into_repr().write_le(&mut w)?;
+        secret.into_repr().write_le(&mut output)?;
+        public.into_repr().write_le(&mut output)?;
         Ok(())
     }
 
