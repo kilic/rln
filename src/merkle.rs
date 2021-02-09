@@ -13,7 +13,6 @@ pub struct IncrementalMerkleTree<E>
 where
     E: Engine,
 {
-    pub self_index: usize,
     pub current_index: usize,
     merkle_tree: MerkleTree<E>,
 }
@@ -22,7 +21,7 @@ impl<E> IncrementalMerkleTree<E>
 where
     E: Engine,
 {
-    pub fn empty(hasher: Hasher<E>, depth: usize, self_index: usize) -> Self {
+    pub fn empty(hasher: Hasher<E>, depth: usize) -> Self {
         let mut zero: Vec<E::Fr> = Vec::with_capacity(depth + 1);
         zero.push(E::Fr::from_str("0").unwrap());
         for i in 0..depth {
@@ -37,7 +36,6 @@ where
         };
         let current_index: usize = 0;
         IncrementalMerkleTree {
-            self_index,
             current_index,
             merkle_tree,
         }
@@ -63,10 +61,6 @@ where
             ));
         }
         self.merkle_tree.get_witness(index)
-    }
-
-    pub fn get_auth_path(&self) -> Vec<(E::Fr, bool)> {
-        self.merkle_tree.get_witness(self.self_index).unwrap()
     }
 
     pub fn hash(&self, inputs: Vec<E::Fr>) -> E::Fr {

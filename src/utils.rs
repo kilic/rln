@@ -5,7 +5,7 @@ use bellman::pairing::{CurveAffine, EncodedPoint, Engine};
 use rand::{Rand, SeedableRng, XorShiftRng};
 use std::io::{self, Error, ErrorKind, Read, Write};
 
-pub fn read_inputs<R: Read, E: Engine>(mut reader: R, n: usize) -> io::Result<Vec<E::Fr>> {
+pub fn read_fr<R: Read, E: Engine>(mut reader: R, n: usize) -> io::Result<Vec<E::Fr>> {
     let mut out: Vec<E::Fr> = Vec::new();
     let mut buf = <E::Fr as PrimeField>::Repr::default();
     for _ in 0..n {

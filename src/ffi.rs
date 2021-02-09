@@ -26,16 +26,28 @@ impl<'a> From<&Buffer> for &'a [u8] {
         unsafe { slice::from_raw_parts(src.ptr, src.len) }
     }
 }
+#[repr(C)]
+#[derive(Clone, Debug, PartialEq)]
+pub struct Auth {
+    secret_buffer: *const Buffer,
+    pub index: usize,
+}
+
+impl Auth {
+    fn get_secret(&self) -> &[u8] {
+        let secret_data = <&[u8]>::from(unsafe { &*self.secret_buffer });
+        secret_data
+    }
+}
 
 #[no_mangle]
 pub extern "C" fn new_circuit_from_params(
     merkle_depth: usize,
-    index: usize,
     parameters_buffer: *const Buffer,
     ctx: *mut *mut RLN<Bn256>,
 ) -> bool {
     let buffer = <&[u8]>::from(unsafe { &*parameters_buffer });
-    let rln = match RLN::<Bn256>::new_with_raw_params(merkle_depth, index, buffer, None) {
+    let rln = match RLN::<Bn256>::new_with_raw_params(merkle_depth, buffer, None) {
         Ok(rln) => rln,
         Err(_) => return false,
     };
@@ -66,12 +78,15 @@ pub extern "C" fn delete_member(ctx: *mut RLN<Bn256>, index: usize) -> bool {
 pub extern "C" fn generate_proof(
     ctx: *const RLN<Bn256>,
     input_buffer: *const Buffer,
+    auth: *const Auth,
     output_buffer: *mut Buffer,
 ) -> bool {
     let rln = unsafe { &*ctx };
+    let auth = unsafe { &*auth };
     let input_data = <&[u8]>::from(unsafe { &*input_buffer });
     let mut output_data: Vec<u8> = Vec::new();
-    match rln.generate_proof(input_data, &mut output_data) {
+
+    match rln.generate_proof(input_data, auth.get_secret(), auth.index, &mut output_data) {
         Ok(proof_data) => proof_data,
         Err(_) => return false,
     };
@@ -103,14 +118,13 @@ pub extern "C" fn verify(
 pub extern "C" fn hash(
     ctx: *const RLN<Bn256>,
     inputs_buffer: *const Buffer,
-    input_len: *const usize,
+    input_len: usize,
     output_buffer: *mut Buffer,
 ) -> bool {
     let rln = unsafe { &*ctx };
     let input_data = <&[u8]>::from(unsafe { &*inputs_buffer });
-    let n: usize = unsafe { *input_len };
     let mut output_data: Vec<u8> = Vec::new();
-    match rln.hash(input_data, n, &mut output_data) {
+    match rln.hash(input_data, input_len, &mut output_data) {
         Ok(output_data) => output_data,
         Err(_) => return false,
     };
@@ -164,17 +178,14 @@ mod tests {
     fn rln_pointer(circuit_parameters: Vec<u8>) -> MaybeUninit<*mut RLN<Bn256>> {
         // restore this new curcuit with bindings
         let merkle_depth = merkle_depth();
-        let index = index();
         let circuit_parameters_buffer = &Buffer::from(circuit_parameters.as_ref());
         let mut rln_pointer = MaybeUninit::<*mut RLN<Bn256>>::uninit();
-        unsafe {
-            new_circuit_from_params(
-                merkle_depth,
-                index,
-                circuit_parameters_buffer,
-                rln_pointer.as_mut_ptr(),
-            )
-        };
+        let success = new_circuit_from_params(
+            merkle_depth,
+            circuit_parameters_buffer,
+            rln_pointer.as_mut_ptr(),
+        );
+        assert!(success, "cannot init rln instance");
 
         rln_pointer
     }
@@ -195,10 +206,12 @@ mod tests {
 
         // generate new key pair
         let mut keypair_buffer = MaybeUninit::<Buffer>::uninit();
-        let success = unsafe { key_gen(rln_pointer, keypair_buffer.as_mut_ptr()) };
+        let success = key_gen(rln_pointer, keypair_buffer.as_mut_ptr());
         assert!(success, "key generation failed");
         let keypair_buffer = unsafe { keypair_buffer.assume_init() };
         let mut keypair_data = <&[u8]>::from(&keypair_buffer);
+
+        // read keypair
         let mut buf = <Fr as PrimeField>::Repr::default();
         buf.read_le(&mut keypair_data).unwrap();
         let id_key = Fr::from_repr(buf).unwrap();
@@ -228,23 +241,33 @@ mod tests {
             let inputs = RLNSignal::<Bn256> {
                 epoch: epoch,
                 hash: signal_hash,
-                id_key: id_key,
             };
 
-            // generate proof
+            // serialize signal
             let mut inputs_data: Vec<u8> = Vec::new();
             inputs.write(&mut inputs_data).unwrap();
             let inputs_buffer = &Buffer::from(inputs_data.as_ref());
+
+            // construct auth object
+            let mut secret_data: Vec<u8> = Vec::new();
+            id_key.into_repr().write_le(&mut secret_data).unwrap();
+            let secret_buffer = &Buffer::from(secret_data.as_ref());
+            let auth = &Auth {
+                secret_buffer,
+                index,
+            } as *const Auth;
+
+            // generate proof
             let mut proof_buffer = MaybeUninit::<Buffer>::uninit();
             let success =
-                unsafe { generate_proof(rln_pointer, inputs_buffer, proof_buffer.as_mut_ptr()) };
+                generate_proof(rln_pointer, inputs_buffer, auth, proof_buffer.as_mut_ptr());
             assert!(success, "proof generation failed");
             let mut proof_buffer = unsafe { proof_buffer.assume_init() };
 
             // verify proof
             let mut result = 0u32;
             let result_ptr = &mut result as *mut u32;
-            let success = unsafe { verify(rln_pointer, &mut proof_buffer, result_ptr) };
+            let success = verify(rln_pointer, &mut proof_buffer, result_ptr);
             assert!(success, "verification failed");
             assert_eq!(0, result);
         };
@@ -281,7 +304,6 @@ mod tests {
         let input_buffer = &Buffer::from(input_data.as_ref());
 
         let input_len: usize = 2;
-        let input_len_pointer = &input_len as *const usize;
 
         let expected = hasher.hash(inputs);
         let mut expected_data: Vec<u8> = Vec::new();
@@ -289,14 +311,13 @@ mod tests {
 
         let mut result_buffer = MaybeUninit::<Buffer>::uninit();
 
-        let success = unsafe {
-            hash(
-                rln_pointer,
-                input_buffer,
-                input_len_pointer,
-                result_buffer.as_mut_ptr(),
-            )
-        };
+        let success = hash(
+            rln_pointer,
+            input_buffer,
+            input_len,
+            result_buffer.as_mut_ptr(),
+        );
+
         assert!(success, "hash ffi call failed");
 
         let result_buffer = unsafe { result_buffer.assume_init() };
@@ -319,7 +340,7 @@ mod tests {
 
         let mut keypair_buffer = MaybeUninit::<Buffer>::uninit();
 
-        let success = unsafe { key_gen(rln_pointer, keypair_buffer.as_mut_ptr()) };
+        let success = key_gen(rln_pointer, keypair_buffer.as_mut_ptr());
         assert!(success, "proof generation failed");
 
         let keypair_buffer = unsafe { keypair_buffer.assume_init() };
@@ -333,5 +354,22 @@ mod tests {
         let expected_public: Fr = hasher.hash(vec![secret]);
 
         assert_eq!(public, expected_public);
+    }
+
+    #[test]
+    #[ignore]
+    fn test_parameters_from_file() {
+        use hex;
+        use std::fs;
+        let data = fs::read("./parameters.key").expect("Unable to read file");
+        let merkle_depth = merkle_depth();
+        let circuit_parameters_buffer = &Buffer::from(data.as_ref());
+        let mut rln_pointer = MaybeUninit::<*mut RLN<Bn256>>::uninit();
+        let success = new_circuit_from_params(
+            merkle_depth,
+            circuit_parameters_buffer,
+            rln_pointer.as_mut_ptr(),
+        );
+        assert!(success, "creating failed");
     }
 }
