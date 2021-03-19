@@ -1,8 +1,6 @@
 use bellman::groth16::Proof;
 use bellman::pairing::ff::{Field, PrimeField, PrimeFieldRepr};
 use bellman::pairing::{CurveAffine, EncodedPoint, Engine};
-
-use rand::{Rand, SeedableRng, XorShiftRng};
 use std::io::{self, Error, ErrorKind, Read, Write};
 
 pub fn read_fr<R: Read, E: Engine>(mut reader: R, n: usize) -> io::Result<Vec<E::Fr>> {

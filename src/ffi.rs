@@ -359,7 +359,6 @@ mod tests {
     #[test]
     #[ignore]
     fn test_parameters_from_file() {
-        use hex;
         use std::fs;
         let data = fs::read("./parameters.key").expect("Unable to read file");
         let merkle_depth = merkle_depth();
