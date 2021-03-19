@@ -174,11 +174,11 @@ mod tests {
     use std::mem::MaybeUninit;
 
     fn merkle_depth() -> usize {
-        3usize
+        4usize
     }
 
     fn index() -> usize {
-        2usize
+        13usize
     }
 
     fn rln_test() -> bench::RLNTest<Bn256> {
@@ -230,7 +230,7 @@ mod tests {
         // generate new key pair
         let mut keypair_buffer = MaybeUninit::<Buffer>::uninit();
         let success = key_gen(rln_pointer, keypair_buffer.as_mut_ptr());
-        assert!(success, "key generation failed");
+        assert!(success, "key generation call failed");
         let keypair_buffer = unsafe { keypair_buffer.assume_init() };
         let mut keypair_data = <&[u8]>::from(&keypair_buffer);
 
@@ -254,7 +254,7 @@ mod tests {
             let input_buffer = &Buffer::from(input_data.as_ref());
 
             let success = update_next_member(rln_pointer, input_buffer);
-            assert!(success, "update with new pubkey failed");
+            assert!(success, "update with new pubkey call failed");
         }
 
         let mut gen_proof_and_verify = |rln_pointer: *const RLN<Bn256>| {
@@ -284,22 +284,46 @@ mod tests {
             let mut proof_buffer = MaybeUninit::<Buffer>::uninit();
             let success =
                 generate_proof(rln_pointer, inputs_buffer, auth, proof_buffer.as_mut_ptr());
-            assert!(success, "proof generation failed");
+            assert!(success, "proof generation call failed");
             let mut proof_buffer = unsafe { proof_buffer.assume_init() };
 
             // verify proof
             let mut result = 0u32;
             let result_ptr = &mut result as *mut u32;
             let success = verify(rln_pointer, &mut proof_buffer, result_ptr);
-            assert!(success, "verification failed");
+            assert!(success, "verification call failed");
             assert_eq!(0, result);
+
+            // construct bad auth object
+            let mut secret_data: Vec<u8> = Vec::new();
+            id_key.into_repr().write_le(&mut secret_data).unwrap();
+            let secret_buffer = &Buffer::from(secret_data.as_ref());
+            let bad_index = index - 1;
+            let auth = &Auth {
+                secret_buffer,
+                index: bad_index,
+            } as *const Auth;
+
+            // generate false proof
+            let mut proof_buffer = MaybeUninit::<Buffer>::uninit();
+            let success =
+                generate_proof(rln_pointer, inputs_buffer, auth, proof_buffer.as_mut_ptr());
+            assert!(success, "proof generation call failed");
+            let mut proof_buffer = unsafe { proof_buffer.assume_init() };
+
+            // verify proof
+            let mut result = 0u32;
+            let result_ptr = &mut result as *mut u32;
+            let success = verify(rln_pointer, &mut proof_buffer, result_ptr);
+            assert!(success, "verification call failed");
+            assert_eq!(1, result);
         };
 
         gen_proof_and_verify(rln_pointer);
 
         // delete 0th member
         let success = delete_member(rln_pointer, 0);
-        assert!(success, "deletion failed");
+        assert!(success, "deletion call failed");
 
         // gen proof & verify once more
         gen_proof_and_verify(rln_pointer);
