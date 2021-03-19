@@ -117,6 +117,14 @@ where
         ))
     }
 
+    /// returns current membership root
+    /// * `root` is a scalar field element in 32 bytes
+    pub fn get_root<W: Write>(&self, mut result_data: W) -> io::Result<()> {
+        let root = self.tree.get_root();
+        root.into_repr().write_le(&mut result_data)?;
+        Ok(())
+    }
+
     /// inserts new member with given public key
     /// * `public_key_data` is a 32 scalar field element in 32 bytes
     pub fn update_next_member<R: Read>(&mut self, public_key_data: R) -> io::Result<()> {

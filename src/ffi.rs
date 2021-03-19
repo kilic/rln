@@ -56,6 +56,19 @@ pub extern "C" fn new_circuit_from_params(
 }
 
 #[no_mangle]
+pub extern "C" fn get_root(ctx: *const RLN<Bn256>, output_buffer: *mut Buffer) -> bool {
+    let rln = unsafe { &*ctx };
+    let mut output_data: Vec<u8> = Vec::new();
+    match rln.get_root(&mut output_data) {
+        Ok(_) => true,
+        Err(_) => false,
+    };
+    unsafe { *output_buffer = Buffer::from(&output_data[..]) };
+    std::mem::forget(output_data);
+    true
+}
+
+#[no_mangle]
 pub extern "C" fn update_next_member(ctx: *mut RLN<Bn256>, input_buffer: *const Buffer) -> bool {
     let rln = unsafe { &mut *ctx };
     let input_data = <&[u8]>::from(unsafe { &*input_buffer });
@@ -204,6 +217,16 @@ mod tests {
         let rln_pointer = unsafe { &mut *rln_pointer.assume_init() };
         let index = index();
 
+        let mut result_buffer = MaybeUninit::<Buffer>::uninit();
+        let success = get_root(rln_pointer, result_buffer.as_mut_ptr());
+        assert!(success, "get root call failed");
+
+        // use hex;
+        // let result_buffer = unsafe { result_buffer.assume_init() };
+        // let result_data = <&[u8]>::from(&result_buffer);
+        // let empty_tree_root = hex::encode(result_data);
+        // println!("{}", empty_tree_root);
+
         // generate new key pair
         let mut keypair_buffer = MaybeUninit::<Buffer>::uninit();
         let success = key_gen(rln_pointer, keypair_buffer.as_mut_ptr());
@@ -263,7 +286,6 @@ mod tests {
                 generate_proof(rln_pointer, inputs_buffer, auth, proof_buffer.as_mut_ptr());
             assert!(success, "proof generation failed");
             let mut proof_buffer = unsafe { proof_buffer.assume_init() };
-            println!("LENX, {}", proof_buffer.len);
 
             // verify proof
             let mut result = 0u32;
