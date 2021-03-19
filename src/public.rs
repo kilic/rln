@@ -117,7 +117,7 @@ where
         ))
     }
 
-    //// inserts new member with given public key
+    /// inserts new member with given public key
     /// * `public_key_data` is a 32 scalar field element in 32 bytes
     pub fn update_next_member<R: Read>(&mut self, public_key_data: R) -> io::Result<()> {
         let mut buf = <E::Fr as PrimeField>::Repr::default();
@@ -154,13 +154,13 @@ where
     /// given public inputs and autharization data generates public inputs and proof
     /// * expect `input`  serialized as |epoch<32>|signal_hash<32>|
     /// * expect `id_key_data` is a scalar field element in 32 bytes
-    /// * `output_data` is proof data serialized as |proof<416>|root<32>|epoch<32>|share_x<32>|share_y<32>|nullifier<32>|
+    /// * `result_data` is proof data serialized as |proof<256>|root<32>|epoch<32>|share_x<32>|share_y<32>|nullifier<32>|
     pub fn generate_proof<R: Read, W: Write>(
         &self,
         input_data: R,
         id_key_data: R,
         member_index: usize,
-        mut output_data: W,
+        mut result_data: W,
     ) -> io::Result<()> {
         let mut rng = ChaChaRng::new_unseeded();
         let signal = RLNSignal::<E>::read(input_data)?;
@@ -201,19 +201,19 @@ where
 
         // TOOD: handle create proof error
         let proof = create_random_proof(circuit, &self.circuit_parameters, &mut rng).unwrap();
-        write_uncompressed_proof(proof.clone(), &mut output_data)?;
-        root.into_repr().write_le(&mut output_data)?;
-        signal.epoch.into_repr().write_le(&mut output_data)?;
-        share_x.into_repr().write_le(&mut output_data)?;
-        share_y.into_repr().write_le(&mut output_data)?;
-        nullifier.into_repr().write_le(&mut output_data)?;
+        write_uncompressed_proof(proof.clone(), &mut result_data)?;
+        root.into_repr().write_le(&mut result_data)?;
+        signal.epoch.into_repr().write_le(&mut result_data)?;
+        share_x.into_repr().write_le(&mut result_data)?;
+        share_y.into_repr().write_le(&mut result_data)?;
+        nullifier.into_repr().write_le(&mut result_data)?;
 
         Ok(())
     }
 
     /// given proof and public data verifies the signal
     /// * expect `proof_data` is serialized as:
-    /// |proof<416>|root<32>|epoch<32>|share_x<32>|share_y<32>|nullifier<32>|
+    /// |proof<256>|root<32>|epoch<32>|share_x<32>|share_y<32>|nullifier<32>|
     pub fn verify<R: Read>(&self, mut proof_data: R) -> io::Result<bool> {
         let proof = read_uncompressed_proof(&mut proof_data)?;
         let public_inputs = RLNInputs::<E>::read_public_inputs(&mut proof_data)?;

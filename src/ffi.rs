@@ -263,6 +263,7 @@ mod tests {
                 generate_proof(rln_pointer, inputs_buffer, auth, proof_buffer.as_mut_ptr());
             assert!(success, "proof generation failed");
             let mut proof_buffer = unsafe { proof_buffer.assume_init() };
+            println!("LENX, {}", proof_buffer.len);
 
             // verify proof
             let mut result = 0u32;
