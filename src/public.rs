@@ -34,10 +34,10 @@ where
         let mut buf = <E::Fr as PrimeField>::Repr::default();
 
         buf.read_le(&mut reader)?;
-        let hash =
+        let epoch =
             E::Fr::from_repr(buf).map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))?;
         buf.read_le(&mut reader)?;
-        let epoch =
+        let hash =
             E::Fr::from_repr(buf).map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))?;
 
         Ok(RLNSignal { epoch, hash })
