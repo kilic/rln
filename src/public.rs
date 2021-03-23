@@ -9,7 +9,7 @@ use bellman::groth16::{create_random_proof, Parameters, Proof};
 use bellman::pairing::ff::{Field, PrimeField, PrimeFieldRepr};
 use bellman::pairing::{CurveAffine, EncodedPoint, Engine};
 use bellman::{Circuit, ConstraintSystem, SynthesisError};
-use rand::{ChaChaRng, Rand, Rng};
+use rand::{thread_rng, Rand, Rng};
 use std::{
     io::{self, Error, ErrorKind, Read, Write},
     ptr::null,
@@ -68,7 +68,7 @@ where
     }
 
     fn new_circuit(merkle_depth: usize, poseidon_params: PoseidonParams<E>) -> Parameters<E> {
-        let mut rng = ChaChaRng::new_unseeded();
+        let mut rng = thread_rng();
         let inputs = RLNInputs::<E>::empty(merkle_depth);
         let circuit = RLNCircuit::<E> {
             inputs,
@@ -170,7 +170,7 @@ where
         member_index: usize,
         mut result_data: W,
     ) -> io::Result<()> {
-        let mut rng = ChaChaRng::new_unseeded();
+        let mut rng = thread_rng();
         let signal = RLNSignal::<E>::read(input_data)?;
         // prepare inputs
 
@@ -234,7 +234,7 @@ where
     /// generates public private key pair
     /// * `key_pair_data` is seralized as |secret<32>|public<32>|
     pub fn key_gen<W: Write>(&self, mut key_pair_data: W) -> io::Result<()> {
-        let mut rng = ChaChaRng::new_unseeded();
+        let mut rng = thread_rng();
         let hasher = self.hasher();
         let secret = E::Fr::rand(&mut rng);
         let public: E::Fr = hasher.hash(vec![secret.clone()]);
