@@ -19,12 +19,15 @@ sapling-crypto = { package = "sapling-crypto_ce", version = "0.1.3", default-fea
 # sapling-crypto = {package = "sapling-crypto_ce", path = "../sapling-crypto", default-features = false }
 bellman = { package = "bellman_ce", version = "0.3.4", default-features = false }
 # bellman = {package = "bellman_ce", path = "../bellman", default-features = false }
+sha2 = "0.9.8"
+digest = "0.9"
+num-bigint = "0.4"
+num-traits = "0.2"
+byteorder = "1.4.3"
+hex = "0.4"
 
-[dev-dependencies]
-hex="*"
 
 [target.'cfg(target_arch = "wasm32")'.dependencies]
-hex = "0.4"
 console_error_panic_hook = { version = "0.1.1" }
 wasm-bindgen = "=0.2.60"
 # wee_alloc = "0.4.5"

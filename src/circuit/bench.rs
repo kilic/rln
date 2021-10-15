@@ -2,6 +2,7 @@ use crate::circuit::rln::{RLNCircuit, RLNInputs};
 use crate::merkle::MerkleTree;
 use crate::poseidon::{Poseidon as PoseidonHasher, PoseidonParams};
 use crate::{circuit::poseidon::PoseidonCircuit, public::RLNSignal};
+use byteorder::{LittleEndian, WriteBytesExt};
 use rand::{Rand, SeedableRng, XorShiftRng};
 use sapling_crypto::bellman::groth16::*;
 use sapling_crypto::bellman::pairing::ff::{Field, PrimeField, PrimeFieldRepr};
@@ -40,7 +41,7 @@ pub struct RLNTest<E>
 where
     E: Engine,
 {
-    rln: RLN<E>,
+    pub rln: RLN<E>,
     merkle_depth: usize,
 }
 
@@ -142,20 +143,8 @@ where
         inputs
     }
 
-    pub fn signal(&self) -> RLNSignal<E> {
-        let mut rng = Self::rng();
-        let epoch = E::Fr::rand(&mut rng);
-        let signal_hash = E::Fr::rand(&mut rng);
-
-        RLNSignal {
-            epoch,
-            hash: signal_hash,
-        }
-    }
-
     pub fn synthesize(&self) -> usize {
         let hasher = PoseidonCircuit::new(self.rln.poseidon_params());
-        println!("{}", self.merkle_depth);
         let inputs = self.valid_inputs();
         let circuit = RLNCircuit::<E> {
             inputs: inputs.clone(),
@@ -184,33 +173,45 @@ where
     }
 
     pub fn run_prover_bench(&self) -> ProverBenchResult {
-        let mut signal_data: Vec<u8> = Vec::new();
-        let signal = self.signal();
-        signal.write(&mut signal_data).unwrap();
-
-        let mut proof: Vec<u8> = Vec::new();
         let now = Instant::now();
 
-        let mut secret_key_data: Vec<u8> = Vec::new();
         let secret_key = Self::secret_key();
-        secret_key
-            .into_repr()
-            .write_le(&mut secret_key_data)
-            .unwrap();
         let id_index = Self::id_index();
 
+        // serialize input
+        let mut rng = Self::rng();
+
+        let epoch = E::Fr::rand(&mut rng);
+        let signal = b"rln signal test xyz abc";
+
+        let mut input_data: Vec<u8> = Vec::new();
+        secret_key.into_repr().write_le(&mut input_data).unwrap();
+        input_data
+            .write_u64::<LittleEndian>(id_index as u64)
+            .unwrap();
+
+        epoch.into_repr().write_le(&mut input_data).unwrap();
+        input_data
+            .write_u64::<LittleEndian>(signal.len() as u64)
+            .unwrap();
+        input_data.write(&signal[..]).unwrap();
+
+        let mut proof: Vec<u8> = Vec::new();
+
         self.rln
-            .generate_proof(
-                signal_data.as_slice(),
-                secret_key_data.as_slice(),
-                id_index,
-                &mut proof,
-            )
+            .generate_proof(input_data.as_slice(), &mut proof)
             .unwrap();
 
         let prover_time = now.elapsed().as_millis() as f64 / 1000.0;
 
-        assert!(self.rln.verify(proof.as_slice()).unwrap(), true);
+        let mut input_data = proof.clone();
+        input_data
+            .write_u64::<LittleEndian>(signal.len() as u64)
+            .unwrap();
+
+        input_data.write(&signal[..]).unwrap();
+
+        assert!(self.rln.verify(input_data.as_slice()).unwrap());
 
         let mut circuit_parameters: Vec<u8> = Vec::new();
         self.rln

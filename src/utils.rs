@@ -1,7 +1,18 @@
 use bellman::groth16::Proof;
-use bellman::pairing::ff::{Field, PrimeField, PrimeFieldRepr};
+use bellman::pairing::ff::{Field, PrimeField, PrimeFieldRepr, ScalarEngine};
 use bellman::pairing::{CurveAffine, EncodedPoint, Engine};
+use byteorder::{LittleEndian, ReadBytesExt};
 use std::io::{self, Error, ErrorKind, Read, Write};
+
+use crate::hash_to_field::hash_to_field;
+
+pub fn read_signal_hash<R: Read, E: Engine>(mut reader: R) -> io::Result<E::Fr> {
+    let n = reader.read_u64::<LittleEndian>()?;
+    let mut buf: Vec<u8> = vec![0; n as usize];
+    reader.read(&mut buf[..])?;
+
+    Ok(hash_to_field::<E>(&buf[..]))
+}
 
 pub fn read_fr<R: Read, E: Engine>(mut reader: R, n: usize) -> io::Result<Vec<E::Fr>> {
     let mut out: Vec<E::Fr> = Vec::new();

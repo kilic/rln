@@ -91,15 +91,13 @@ pub extern "C" fn delete_member(ctx: *mut RLN<Bn256>, index: usize) -> bool {
 pub extern "C" fn generate_proof(
     ctx: *const RLN<Bn256>,
     input_buffer: *const Buffer,
-    auth: *const Auth,
     output_buffer: *mut Buffer,
 ) -> bool {
     let rln = unsafe { &*ctx };
-    let auth = unsafe { &*auth };
     let input_data = <&[u8]>::from(unsafe { &*input_buffer });
     let mut output_data: Vec<u8> = Vec::new();
 
-    match rln.generate_proof(input_data, auth.get_secret(), auth.index, &mut output_data) {
+    match rln.generate_proof(input_data, &mut output_data) {
         Ok(proof_data) => proof_data,
         Err(_) => return false,
     };
@@ -111,7 +109,7 @@ pub extern "C" fn generate_proof(
 #[no_mangle]
 pub extern "C" fn verify(
     ctx: *const RLN<Bn256>,
-    proof_buffer: *mut Buffer,
+    proof_buffer: *const Buffer,
     result_ptr: *mut u32,
 ) -> bool {
     let rln = unsafe { &*ctx };
@@ -128,16 +126,16 @@ pub extern "C" fn verify(
 }
 
 #[no_mangle]
-pub extern "C" fn hash(
+pub extern "C" fn signal_to_field(
     ctx: *const RLN<Bn256>,
     inputs_buffer: *const Buffer,
-    input_len: usize,
     output_buffer: *mut Buffer,
 ) -> bool {
     let rln = unsafe { &*ctx };
     let input_data = <&[u8]>::from(unsafe { &*inputs_buffer });
+
     let mut output_data: Vec<u8> = Vec::new();
-    match rln.hash(input_data, input_len, &mut output_data) {
+    match rln.signal_to_field(input_data, &mut output_data) {
         Ok(output_data) => output_data,
         Err(_) => return false,
     };
@@ -147,14 +145,14 @@ pub extern "C" fn hash(
 }
 
 #[no_mangle]
-pub extern "C" fn key_gen(ctx: *const RLN<Bn256>, keypair_buffer: *mut Buffer) -> bool {
+pub extern "C" fn key_gen(ctx: *const RLN<Bn256>, input_buffer: *mut Buffer) -> bool {
     let rln = unsafe { &*ctx };
     let mut output_data: Vec<u8> = Vec::new();
     match rln.key_gen(&mut output_data) {
         Ok(_) => (),
         Err(_) => return false,
     }
-    unsafe { *keypair_buffer = Buffer::from(&output_data[..]) };
+    unsafe { *input_buffer = Buffer::from(&output_data[..]) };
     std::mem::forget(output_data);
     true
 }
@@ -165,9 +163,11 @@ use std::io::{self, Read, Write};
 
 #[cfg(test)]
 mod tests {
+    use crate::hash_to_field::hash_to_field;
     use crate::{circuit::bench, public::RLNSignal};
     use crate::{poseidon::PoseidonParams, public};
     use bellman::pairing::bn256::{Bn256, Fr};
+    use byteorder::{LittleEndian, WriteBytesExt};
     use rand::{Rand, SeedableRng, XorShiftRng};
 
     use super::*;
@@ -221,12 +221,6 @@ mod tests {
         let success = get_root(rln_pointer, result_buffer.as_mut_ptr());
         assert!(success, "get root call failed");
 
-        // use hex;
-        // let result_buffer = unsafe { result_buffer.assume_init() };
-        // let result_data = <&[u8]>::from(&result_buffer);
-        // let empty_tree_root = hex::encode(result_data);
-        // println!("{}", empty_tree_root);
-
         // generate new key pair
         let mut keypair_buffer = MaybeUninit::<Buffer>::uninit();
         let success = key_gen(rln_pointer, keypair_buffer.as_mut_ptr());
@@ -257,113 +251,93 @@ mod tests {
             assert!(success, "update with new pubkey call failed");
         }
 
-        let mut gen_proof_and_verify = |rln_pointer: *const RLN<Bn256>| {
+        let mut gen_proof_and_verify = |rln_pointer: *const RLN<Bn256>, fail: bool| {
             // create signal
             let epoch = Fr::rand(&mut rng);
-            let signal_hash = Fr::rand(&mut rng);
-            let inputs = RLNSignal::<Bn256> {
-                epoch: epoch,
-                hash: signal_hash,
-            };
+            let signal = b"rln signal test xyz abc";
 
-            // serialize signal
-            let mut inputs_data: Vec<u8> = Vec::new();
-            inputs.write(&mut inputs_data).unwrap();
-            let inputs_buffer = &Buffer::from(inputs_data.as_ref());
+            // serialize input
+            let mut input_data: Vec<u8> = Vec::new();
+            id_key.into_repr().write_le(&mut input_data).unwrap();
+            if fail {
+                input_data
+                    .write_u64::<LittleEndian>(index as u64 - 1)
+                    .unwrap();
+            } else {
+                input_data.write_u64::<LittleEndian>(index as u64).unwrap();
+            }
+            epoch.into_repr().write_le(&mut input_data).unwrap();
+            input_data
+                .write_u64::<LittleEndian>(signal.len() as u64)
+                .unwrap();
+            input_data.write(&signal[..]).unwrap();
 
-            // construct auth object
-            let mut secret_data: Vec<u8> = Vec::new();
-            id_key.into_repr().write_le(&mut secret_data).unwrap();
-            let secret_buffer = &Buffer::from(secret_data.as_ref());
-            let auth = &Auth {
-                secret_buffer,
-                index,
-            } as *const Auth;
+            let input_buffer = &Buffer::from(input_data.as_ref());
 
             // generate proof
             let mut proof_buffer = MaybeUninit::<Buffer>::uninit();
-            let success =
-                generate_proof(rln_pointer, inputs_buffer, auth, proof_buffer.as_mut_ptr());
+            let success = generate_proof(rln_pointer, input_buffer, proof_buffer.as_mut_ptr());
             assert!(success, "proof generation call failed");
-            let mut proof_buffer = unsafe { proof_buffer.assume_init() };
+            let proof_buffer = unsafe { proof_buffer.assume_init() };
+
+            let input_data = <&[u8]>::from(&proof_buffer);
+            let mut input_data = input_data.to_vec();
+            input_data
+                .write_u64::<LittleEndian>(signal.len() as u64)
+                .unwrap();
+
+            input_data.write(&signal[..]).unwrap();
 
             // verify proof
+            let input_buffer = &Buffer::from(input_data.as_ref());
             let mut result = 0u32;
             let result_ptr = &mut result as *mut u32;
-            let success = verify(rln_pointer, &mut proof_buffer, result_ptr);
+            let success = verify(rln_pointer, input_buffer, result_ptr);
             assert!(success, "verification call failed");
-            assert_eq!(0, result);
-
-            // construct bad auth object
-            let mut secret_data: Vec<u8> = Vec::new();
-            id_key.into_repr().write_le(&mut secret_data).unwrap();
-            let secret_buffer = &Buffer::from(secret_data.as_ref());
-            let bad_index = index - 1;
-            let auth = &Auth {
-                secret_buffer,
-                index: bad_index,
-            } as *const Auth;
-
-            // generate false proof
-            let mut proof_buffer = MaybeUninit::<Buffer>::uninit();
-            let success =
-                generate_proof(rln_pointer, inputs_buffer, auth, proof_buffer.as_mut_ptr());
-            assert!(success, "proof generation call failed");
-            let mut proof_buffer = unsafe { proof_buffer.assume_init() };
-
-            // verify proof
-            let mut result = 0u32;
-            let result_ptr = &mut result as *mut u32;
-            let success = verify(rln_pointer, &mut proof_buffer, result_ptr);
-            assert!(success, "verification call failed");
-            assert_eq!(1, result);
+            if fail {
+                assert_eq!(1, result);
+            } else {
+                assert_eq!(0, result);
+            }
         };
 
-        gen_proof_and_verify(rln_pointer);
+        gen_proof_and_verify(rln_pointer, false);
+        gen_proof_and_verify(rln_pointer, true);
 
         // delete 0th member
         let success = delete_member(rln_pointer, 0);
         assert!(success, "deletion call failed");
 
-        // gen proof & verify once more
-        gen_proof_and_verify(rln_pointer);
+        gen_proof_and_verify(rln_pointer, false);
+        gen_proof_and_verify(rln_pointer, true);
     }
 
     #[test]
-    fn test_hash_ffi() {
+    fn test_signal_to_field_ffi() {
         let rln_test = rln_test();
         let mut circuit_parameters: Vec<u8> = Vec::new();
         rln_test
             .export_circuit_parameters(&mut circuit_parameters)
             .unwrap();
-        let hasher = rln_test.hasher();
         let rln_pointer = rln_pointer(circuit_parameters);
         let rln_pointer = unsafe { &*rln_pointer.assume_init() };
-        let mut input_data: Vec<u8> = Vec::new();
 
-        let inputs: Vec<Fr> = ["1", "2"]
-            .iter()
-            .map(|e| Fr::from_str(e).unwrap())
-            .collect();
-        inputs.iter().for_each(|e| {
-            e.into_repr().write_le(&mut input_data).unwrap();
-        });
-        let input_buffer = &Buffer::from(input_data.as_ref());
+        let signal = b"rln signal test xyz abc";
 
-        let input_len: usize = 2;
-
-        let expected = hasher.hash(inputs);
+        let expected = hash_to_field::<Bn256>(&signal[..]);
         let mut expected_data: Vec<u8> = Vec::new();
         expected.into_repr().write_le(&mut expected_data).unwrap();
 
+        let mut input_data: Vec<u8> = Vec::new();
+        input_data
+            .write_u64::<LittleEndian>(signal.len() as u64)
+            .unwrap();
+        input_data.write(&signal[..]).unwrap();
+
+        let input_buffer = &Buffer::from(&input_data[..]);
         let mut result_buffer = MaybeUninit::<Buffer>::uninit();
 
-        let success = hash(
-            rln_pointer,
-            input_buffer,
-            input_len,
-            result_buffer.as_mut_ptr(),
-        );
+        let success = signal_to_field(rln_pointer, input_buffer, result_buffer.as_mut_ptr());
 
         assert!(success, "hash ffi call failed");
 

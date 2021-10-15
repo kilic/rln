@@ -216,7 +216,7 @@ fn test_poseidon_hash() {
     let params = PoseidonParams::<Bn256>::new(8, 55, 3, None, None, None);
     let hasher = Poseidon::<Bn256>::new(params);
     let input1: Vec<Fr> = ["0"].iter().map(|e| Fr::from_str(e).unwrap()).collect();
-    let r1: Fr = hasher.hash(input1.to_vec());
+    let r1: Fr = hasher.hash(input1);
     let input2: Vec<Fr> = ["0", "0"]
         .iter()
         .map(|e| Fr::from_str(e).unwrap())

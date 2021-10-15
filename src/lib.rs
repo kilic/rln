@@ -2,6 +2,7 @@
 #![allow(unused_imports)]
 
 pub mod circuit;
+mod hash_to_field;
 pub mod merkle;
 pub mod poseidon;
 pub mod public;

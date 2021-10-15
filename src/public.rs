@@ -1,14 +1,16 @@
 use crate::circuit::rln::{RLNCircuit, RLNInputs};
+use crate::hash_to_field::hash_to_field;
 use crate::merkle::MerkleTree;
 use crate::poseidon::{Poseidon as PoseidonHasher, PoseidonParams};
-use crate::utils::{read_fr, read_uncompressed_proof, write_uncompressed_proof};
+use crate::utils::{read_fr, read_signal_hash, read_uncompressed_proof, write_uncompressed_proof};
 use crate::{circuit::poseidon::PoseidonCircuit, merkle::IncrementalMerkleTree};
 use bellman::groth16::generate_random_parameters;
 use bellman::groth16::{create_proof, prepare_verifying_key, verify_proof};
 use bellman::groth16::{create_random_proof, Parameters, Proof};
-use bellman::pairing::ff::{Field, PrimeField, PrimeFieldRepr};
+use bellman::pairing::ff::{Field, PrimeField, PrimeFieldRepr, ScalarEngine};
 use bellman::pairing::{CurveAffine, EncodedPoint, Engine};
 use bellman::{Circuit, ConstraintSystem, SynthesisError};
+use byteorder::{LittleEndian, ReadBytesExt};
 use rand::{thread_rng, Rand, Rng};
 use std::{
     io::{self, Error, ErrorKind, Read, Write},
@@ -36,33 +38,20 @@ where
         buf.read_le(&mut reader)?;
         let epoch =
             E::Fr::from_repr(buf).map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))?;
-        buf.read_le(&mut reader)?;
-        let hash =
-            E::Fr::from_repr(buf).map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))?;
+
+        let hash = read_signal_hash::<R, E>(reader)?;
 
         Ok(RLNSignal { epoch, hash })
     }
-
-    pub fn write<W: Write>(&self, mut writer: W) -> io::Result<()> {
-        self.epoch.into_repr().write_le(&mut writer).unwrap();
-        self.hash.into_repr().write_le(&mut writer).unwrap();
-        Ok(())
-    }
 }
 
-pub struct RLN<E>
-where
-    E: Engine,
-{
+pub struct RLN<E: Engine> {
     circuit_parameters: Parameters<E>,
     poseidon_params: PoseidonParams<E>,
     tree: IncrementalMerkleTree<E>,
 }
 
-impl<E> RLN<E>
-where
-    E: Engine,
-{
+impl<E: Engine> RLN<E> {
     fn default_poseidon_params() -> PoseidonParams<E> {
         PoseidonParams::<E>::new(8, 55, 3, None, None, None)
     }
@@ -126,10 +115,10 @@ where
     }
 
     /// inserts new member with given public key
-    /// * `public_key_data` is a 32 scalar field element in 32 bytes
-    pub fn update_next_member<R: Read>(&mut self, public_key_data: R) -> io::Result<()> {
+    /// * `input_data` is a 32 scalar field element in 32 bytes
+    pub fn update_next_member<R: Read>(&mut self, input_data: R) -> io::Result<()> {
         let mut buf = <E::Fr as PrimeField>::Repr::default();
-        buf.read_le(public_key_data)?;
+        buf.read_le(input_data)?;
         let leaf =
             E::Fr::from_repr(buf).map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))?;
         self.tree.update_next(leaf)?;
@@ -142,42 +131,34 @@ where
         Ok(())
     }
 
-    /// hashes scalar field elements
-    /// * expect numbers of scalar field element in 32 bytes in `input_data`
-    /// * expect `result_data` is a scalar field element in 32 bytes
-    /// * `n` is number of scalar field elemends stored in `input`
-    pub fn hash<R: Read, W: Write>(
+    /// hashes plain text to a field element
+    pub fn signal_to_field<R: Read, W: Write>(
         &self,
         input_data: R,
-        n: usize,
         mut result_data: W,
     ) -> io::Result<()> {
-        let hasher = self.hasher();
-        let input: Vec<E::Fr> = read_fr::<R, E>(input_data, n)?;
-        let result = hasher.hash(input);
+        let result = read_signal_hash::<R, E>(input_data)?;
         result.into_repr().write_le(&mut result_data)?;
         Ok(())
     }
 
     /// given public inputs and autharization data generates public inputs and proof
-    /// * expect `input`  serialized as |epoch<32>|signal_hash<32>|
-    /// * expect `id_key_data` is a scalar field element in 32 bytes
-    /// * `result_data` is proof data serialized as |proof<256>|root<32>|epoch<32>|share_x<32>|share_y<32>|nullifier<32>|
+    /// * expect `input_data`  serialized as  [ id_key<32> | id_index<8> | epoch<32> | signal_len<8> | signal<var> ]
+    /// * `result_data` is proof data serialized as [ proof<256>| root<32>| epoch<32>| share_x<32>| share_y<32>| nullifier<32> ]
     pub fn generate_proof<R: Read, W: Write>(
         &self,
-        input_data: R,
-        id_key_data: R,
-        member_index: usize,
+        mut input_data: R,
         mut result_data: W,
     ) -> io::Result<()> {
-        let mut rng = thread_rng();
+        let id_key: E::Fr = read_fr::<_, E>(&mut input_data, 1)?[0];
+        let id_index = input_data.read_u64::<LittleEndian>()? as usize;
+
         let signal = RLNSignal::<E>::read(input_data)?;
-        // prepare inputs
+
+        use hex;
 
         let hasher = self.hasher();
         let share_x = signal.hash.clone();
-
-        let id_key: E::Fr = read_fr::<R, E>(id_key_data, 1)?[0];
 
         // line equation
         let a_0 = id_key.clone();
@@ -190,7 +171,7 @@ where
 
         let root = self.tree.get_root();
         // TODO: check id key here
-        let auth_path = self.tree.get_witness(member_index)?;
+        let auth_path = self.tree.get_witness(id_index)?;
 
         let inputs = RLNInputs::<E> {
             share_x: Some(share_x),
@@ -207,7 +188,7 @@ where
             hasher: PoseidonCircuit::new(self.poseidon_params.clone()),
         };
 
-        // TOOD: handle create proof error
+        let mut rng = thread_rng();
         let proof = create_random_proof(circuit, &self.circuit_parameters, &mut rng).unwrap();
         write_uncompressed_proof(proof.clone(), &mut result_data)?;
         root.into_repr().write_le(&mut result_data)?;
@@ -220,26 +201,34 @@ where
     }
 
     /// given proof and public data verifies the signal
-    /// * expect `proof_data` is serialized as:
-    /// |proof<256>|root<32>|epoch<32>|share_x<32>|share_y<32>|nullifier<32>|
-    pub fn verify<R: Read>(&self, mut proof_data: R) -> io::Result<bool> {
-        let proof = read_uncompressed_proof(&mut proof_data)?;
-        let public_inputs = RLNInputs::<E>::read_public_inputs(&mut proof_data)?;
-        // TODO: root must be checked here
+    /// * expect `input_data` is serialized as:
+    /// [ proof<256>| root<32>| epoch<32>| share_x<32>| share_y<32>| nullifier<32> | signal_len<8> | signal<var> ]
+    pub fn verify<R: Read>(&self, mut input_data: R) -> io::Result<bool> {
+        let proof = read_uncompressed_proof(&mut input_data)?;
+        let public_inputs = RLNInputs::<E>::read_public_inputs(&mut input_data)?;
+        let signal_hash = read_signal_hash::<R, E>(input_data)?;
+
+        if signal_hash != public_inputs[2] {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidInput,
+                "signal hash mismatch",
+            ));
+        }
+
         let verifing_key = prepare_verifying_key(&self.circuit_parameters.vk);
         let success = verify_proof(&verifing_key, &proof, &public_inputs).unwrap();
         Ok(success)
     }
 
     /// generates public private key pair
-    /// * `key_pair_data` is seralized as |secret<32>|public<32>|
-    pub fn key_gen<W: Write>(&self, mut key_pair_data: W) -> io::Result<()> {
+    /// * `key_pair_data` is seralized as [ secret<32> | public<32> ]
+    pub fn key_gen<W: Write>(&self, mut input_data: W) -> io::Result<()> {
         let mut rng = thread_rng();
         let hasher = self.hasher();
         let secret = E::Fr::rand(&mut rng);
         let public: E::Fr = hasher.hash(vec![secret.clone()]);
-        secret.into_repr().write_le(&mut key_pair_data)?;
-        public.into_repr().write_le(&mut key_pair_data)?;
+        secret.into_repr().write_le(&mut input_data)?;
+        public.into_repr().write_le(&mut input_data)?;
         Ok(())
     }
 
@@ -259,3 +248,35 @@ where
         self.poseidon_params.clone()
     }
 }
+
+// #[cfg(test)]
+// mod tests {
+//     use crate::{circuit::bench, public::RLNSignal};
+//     use crate::{poseidon::PoseidonParams, public};
+//     use bellman::pairing::bn256::{Bn256, Fr};
+//     use rand::{Rand, SeedableRng, XorShiftRng};
+
+//     fn merkle_depth() -> usize {
+//         4usize
+//     }
+
+//     fn rln_test() -> bench::RLNTest<Bn256> {
+//         let merkle_depth = merkle_depth();
+//         let poseidon_params = PoseidonParams::<Bn256>::new(8, 55, 3, None, None, None);
+//         let rln_test = bench::RLNTest::<Bn256>::new(merkle_depth, Some(poseidon_params));
+//         rln_test
+//     }
+
+//     #[test]
+//     fn test_xxx() {
+//         let rln = rln_test();
+//         let rln = rln.rln;
+
+//         let input_data: Vec<u8> = vec![1, 2, 3, 4];
+//         let n = 4;
+//         let mut result_data: Vec<u8> = Vec::new();
+
+//         rln.signal_to_field(&input_data[..], n, &mut result_data)
+//             .unwrap();
+//     }
+// }
