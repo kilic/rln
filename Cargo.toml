@@ -5,7 +5,7 @@ authors = ["Onur Kılıç <kiliconu@itu.edu.tr>"]
 edition = "2018"
 
 [lib]
-crate-type = ["cdylib", "rlib"]
+crate-type = ["cdylib", "rlib", "staticlib"]
 
 [features]
 multicore = ["sapling-crypto/multicore", "bellman/multicore"]
